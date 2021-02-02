@@ -1,0 +1,411 @@
+from aws_cdk import (
+    aws_ec2 as ec2,
+    aws_s3,
+    aws_s3_notifications as s3n,
+    aws_ecs as ecs,
+    aws_ecr as ecr,
+    aws_efs as efs,
+    aws_events,
+    aws_events_targets as targets,
+    aws_iam,
+    aws_sns,
+    aws_sqs,
+    aws_stepfunctions as sfn,
+    aws_stepfunctions_tasks as tasks,
+    aws_lambda,
+    aws_lambda_event_sources,
+    custom_resources as cr,
+    core,
+    aws_logs,
+)
+
+from lambda_function import lambda_code
+import boto3
+import os
+
+account = boto3.client('sts').get_caller_identity().get('Account')
+region = boto3.session.Session().region_name
+
+
+class Fargate(core.Stack):
+
+    def __init__(self, scope: core.Construct, id: str, image_name: str, ecr_repository_name: str, environment_vars: dict,
+                 memory_limit_mib: int, cpu: int, timeout_minutes: int, s3_filters: list,
+                 input_bucket_name: str, output_bucket_name: str, **kwargs) -> None:
+        """
+        Creates the following infrastructure:
+
+            2 S3 Buckets
+                - "-in" bucket will be monitored for incoming data, and each incoming file will trigger an ECS Task
+                - "-out" bucket will be the destination for saving processed data from the ECS Task
+
+                - These bucket names are automatically passed as environment variables to your docker container
+                    In your docker container, access these bucket names via:
+
+                    import os
+                    src_bucket = os.environ["s3_source"]
+                    dest_bucket = os.environ["s3_destination"]
+
+
+            ECS Fargate Cluster
+                - Using Fargate, this cluster will not cost any money when no tasks are running
+
+            ECS Fargate Task
+
+            ECS Task Role - used by the docker container
+                - Read access to the "-in" bucket and write access to the "-out" bucket
+
+            VPC "MyVpc"
+                Task will be run in this VPC's private subnets
+
+            ECR Repository
+                - reference to the repository hosting the service's docker image
+
+            ECR Image
+                - reference to the service's docker image in the ecr repo
+
+            ECS Log Group for the ECS Task
+                f'{image_name}-log-group'
+
+            Step Function to execute the ECSRunFargateTask command
+
+            Lambda Function listening for S3 Put Object events in src_bucket
+                - then triggers Fargate Task for that object
+
+        :param scope:
+        :param id:
+        :param image_name:
+        :param image_dir:
+        :param build_args:
+        :param memory_limit_mib: RAM to allocate per task
+        :param cpu: CPUs to allocate per task
+        :param kwargs:
+        """
+        super().__init__(scope, id, **kwargs)
+
+        src_bucket = aws_s3.Bucket(
+            self,
+            id='src-bucket',
+            bucket_name=input_bucket_name,
+            removal_policy=core.RemovalPolicy.DESTROY,
+            encryption=aws_s3.BucketEncryption.KMS_MANAGED
+        )
+
+        dest_bucket = aws_s3.Bucket(
+            self,
+            id='dest-bucket',
+            bucket_name=output_bucket_name,
+            removal_policy=core.RemovalPolicy.DESTROY,
+            encryption=aws_s3.BucketEncryption.KMS_MANAGED
+        )
+
+        # Create VPC and Fargate Cluster
+        # NOTE: Limit AZs to avoid reaching resource quotas
+        vpc = ec2.Vpc(
+            self,
+            f"MyVpc",
+            max_azs=2
+       )
+
+        private_subnets = ec2.SubnetSelection(
+            subnet_type=ec2.SubnetType.PRIVATE
+        )
+
+        # EFS
+        fs = efs.FileSystem(
+            self,
+            'efs',
+            vpc=vpc,
+            removal_policy=core.RemovalPolicy.DESTROY,
+            throughput_mode=efs.ThroughputMode.BURSTING,
+            performance_mode=efs.PerformanceMode.MAX_IO
+        )
+
+        access_point = fs.add_access_point(
+            'AccessPoint',
+            path='/lambda',
+            create_acl=efs.Acl(
+                owner_uid='1001',
+                owner_gid='1001',
+                permissions='750'
+            ),
+            posix_user=efs.PosixUser(uid='1001', gid='1001'),
+        )
+
+        # ECS Task Role
+        arn_str = "arn:aws:s3:::"
+
+        ecs_task_role = aws_iam.Role(
+            self,
+            "ecs_task_role2",
+            assumed_by=aws_iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
+            managed_policies=[aws_iam.ManagedPolicy.from_aws_managed_policy_name('CloudWatchFullAccess')]
+        )
+        
+
+        ecs_task_role.add_to_policy(
+            aws_iam.PolicyStatement(
+                actions=["kms:Decrypt", "kms:Encrypt", "kms:ReEncrypt*", "kms:DescribeKey", "kms:GenerateDataKey"],
+                resources=[ "*" ]
+            )
+        )
+
+        ecs_task_role.add_to_policy(
+            aws_iam.PolicyStatement(
+                actions=["s3:Get*", "s3:List*"],
+                resources=["*"]
+            )
+        )
+
+        ecs_task_role.add_to_policy(
+            aws_iam.PolicyStatement(
+                actions=["s3:List*", "s3:PutObject*"],
+                resources=["*"]
+            )
+        )
+
+        ecs_task_role.add_to_policy(
+            aws_iam.PolicyStatement(
+                actions=["*"],
+                resources=[access_point.access_point_arn]
+            )
+        )
+
+        ecs_task_role.add_to_policy(
+            aws_iam.PolicyStatement(
+                actions=[
+                    "elasticfilesystem:ClientMount",
+                    "elasticfilesystem:ClientWrite",
+                    "elasticfilesystem:DescribeMountTargets"
+                ],
+                resources=["*"]
+            )
+        )
+
+        # Define task definition with a single container
+        # The image is built & published from a local asset directory
+        task_definition = ecs.FargateTaskDefinition(
+            self,
+            f'{image_name}_task_definition',
+            family=f"{image_name}-family",
+            cpu=cpu,
+            memory_limit_mib=memory_limit_mib,
+            task_role=ecs_task_role,
+        )
+
+        repo = ecr.Repository.from_repository_name(
+            self,
+            id=id,
+            repository_name=ecr_repository_name
+        )
+
+        img = ecs.EcrImage.from_ecr_repository(
+            repository=repo,
+            tag="latest"
+        )
+
+        logs = ecs.LogDriver.aws_logs(
+              stream_prefix='ecs',
+              log_group=aws_logs.LogGroup(
+                  self,
+                  f'{image_name}-log-group'
+              )
+        )
+
+        container_name = f'{image_name}-container'
+
+        container_def = task_definition.add_container(
+            container_name,
+            image=img,
+            memory_limit_mib=memory_limit_mib,
+            environment={
+                 'topics_to_extract': "/tf"
+            },
+            logging=logs
+        )
+
+ 
+        # Define an ECS cluster hosted within the requested VPC
+        cluster = ecs.Cluster(
+            self,
+            'cluster',
+            cluster_name=f"{image_name}-cluster",
+            container_insights=True,
+            vpc=vpc
+        )
+
+ 
+        run_task = tasks.EcsRunTask(
+            self, 'fargatetask',
+            assign_public_ip=False,
+            subnets=private_subnets,
+            cluster=cluster,
+            launch_target=tasks.EcsFargateLaunchTarget(platform_version=ecs.FargatePlatformVersion.VERSION1_4),
+            task_definition=task_definition,
+            container_overrides=[
+                tasks.ContainerOverride(
+                    container_definition=task_definition.default_container,
+                    environment=[
+                        tasks.TaskEnvironmentVariable(name=k, value=sfn.JsonPath.string_at(v))
+                        for k, v in environment_vars.items()
+                    ]
+                )
+            ],
+            integration_pattern=sfn.IntegrationPattern.RUN_JOB,
+            input_path=sfn.JsonPath.entire_payload,
+            output_path=sfn.JsonPath.entire_payload,
+            timeout=core.Duration.minutes(timeout_minutes),
+        )
+
+
+        job_queue = aws_sqs.Queue(self, 'jobQueue')
+        
+        process_queue_lambda = aws_lambda.Function(
+            self, "JobProcessor",
+            code=aws_lambda.Code.from_asset('./infrastructure/process-queue'),
+            environment={
+                'job_queue_url': job_queue.queue_url,
+                'cluster_arn' : cluster.cluster_arn,
+                'task_definition': task_definition.task_definition_arn,
+                'container_name' : container_name
+            },
+            memory_size=3008,
+            timeout=core.Duration.minutes(15),
+            vpc=vpc,
+            retry_attempts=0,
+            handler="process-queue.lambda_handler",
+            runtime=aws_lambda.Runtime("python3.7", supports_inline_code=True),
+            security_groups=fs.connections.security_groups,
+        )
+
+        job_queue.grant_consume_messages(process_queue_lambda.role)
+
+        aws_events.Rule(self, 'TaskStateChange',
+            event_pattern=aws_events.EventPattern(
+                source = ["aws.ecs"],
+                detail_type =  [
+                   "ECS Task State Change"
+                 ],
+                 
+                detail = { 
+                   "clusterArn": [
+                     cluster.cluster_arn
+                   ]
+                 }),
+            targets=[targets.LambdaFunction(process_queue_lambda)] 
+        )
+
+        ecs_task_role.grant_pass_role(process_queue_lambda.role)  
+        task_definition.execution_role.grant_pass_role(process_queue_lambda.role)  
+        
+        process_queue_lambda.add_to_role_policy(
+            aws_iam.PolicyStatement(
+                actions=["ecs:RunTask"],
+                resources=[task_definition.task_definition_arn]
+            )
+        )
+        
+
+        s3_batch_lambda = aws_lambda.Function(
+            self, "S3Batchprocessor",
+            code=aws_lambda.Code.from_asset('./infrastructure/S3Batch'),
+            environment={
+                'job_queue_url': job_queue.queue_url,
+                'process_queue_lambda' : process_queue_lambda.function_arn
+            },
+            memory_size=3008,
+            timeout=core.Duration.minutes(15),
+            vpc=vpc,
+            retry_attempts=0,
+            handler="s3batch.lambda_handler",
+            runtime=aws_lambda.Runtime("python3.7", supports_inline_code=True),
+            security_groups=fs.connections.security_groups,
+        )
+
+        job_queue.grant_send_messages(s3_batch_lambda.role)
+        process_queue_lambda.grant_invoke(s3_batch_lambda)        
+        s3_batch_lambda.add_to_role_policy(
+            aws_iam.PolicyStatement(
+                actions=["s3:List*", "s3:Get*", "s3:PutObject"],
+                resources=["*"]
+            )
+        )
+        
+
+        
+        state_machine = sfn.StateMachine(
+            self, "RunTaskStateMachine",
+            definition=run_task,
+            timeout=core.Duration.minutes(timeout_minutes),
+        )
+
+        state_machine.grant_task_response(ecs_task_role)
+
+        lambda_function = aws_lambda.Function(
+            self, "StepFunctionTrigger",
+            code=aws_lambda.Code.from_inline(
+                lambda_code
+            ),
+            environment={
+                'state_machine_arn': state_machine.state_machine_arn
+            },
+            memory_size=3008,
+            timeout=core.Duration.minutes(15),
+            vpc=vpc,
+            retry_attempts=0,
+            handler="index.lambda_handler",
+            runtime=aws_lambda.Runtime("python3.7", supports_inline_code=True),
+            security_groups=fs.connections.security_groups,
+            #filesystem=aws_lambda.FileSystem.from_efs_access_point(access_point, mount_path='/mnt/efs')
+        )
+
+        lambda_function.add_to_role_policy(
+            aws_iam.PolicyStatement(
+                actions=["states:StartExecution"],
+                resources=[state_machine.state_machine_arn]
+            )
+        )
+
+        lambda_function.add_to_role_policy(
+            aws_iam.PolicyStatement(
+                actions=["s3:Get*", "s3:List*", "s3:PutObject*"],
+                resources=[
+                    f"{arn_str}{src_bucket.bucket_name}",
+                    f"{arn_str}{src_bucket.bucket_name}/*",
+                ]
+            )
+        )
+
+        lambda_function.add_to_role_policy(
+            aws_iam.PolicyStatement(
+                actions=["*"],
+                resources=[access_point.access_point_arn]
+            )
+        )
+
+        lambda_function.add_to_role_policy(
+            aws_iam.PolicyStatement(
+                actions=[
+                    "elasticfilesystem:ClientMount",
+                    "elasticfilesystem:ClientWrite",
+                    "elasticfilesystem:DescribeMountTargets"
+                ],
+                resources=["*"]
+            )
+        )
+
+
+        for f in s3_filters.get("prefix", []):
+            filters = [aws_s3.NotificationKeyFilter(prefix=f)]
+            src_bucket.add_event_notification(
+                aws_s3.EventType.OBJECT_CREATED,  # Event
+                s3n.LambdaDestination(lambda_function),  # Dest
+                *filters  # Filters
+            )
+        for f in s3_filters.get("suffix", []):
+            filters = [aws_s3.NotificationKeyFilter(suffix=f)]
+            src_bucket.add_event_notification(
+                aws_s3.EventType.OBJECT_CREATED, #Event
+                s3n.LambdaDestination(lambda_function), #Dest
+                *filters #Filters
+            )
