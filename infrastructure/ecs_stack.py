@@ -557,8 +557,6 @@ class RosbagProcessor(core.Stack):
         )
 
         # MWAA execution role
-        arn_str = "arn:aws:s3:::"
-
         mwaa_exec_role = aws_iam.Role(
             self,
             "mwaa_exec_role",
@@ -579,8 +577,16 @@ class RosbagProcessor(core.Stack):
             )
         )
 
-        mwaa_subnet_ids = list(map(lambda x: x.subnet_id, vpc.private_subnets))
+        # MWAA bastion host
+        mwaa_bastion = ec2.BastionHostLinux(
+            self,
+            id="mwaa-bastion",
+            vpc=vpc
+        )
+        core.Tags.of(mwaa_bastion).add("airflow_function", "bastion")
 
+        # MWAA environment
+        mwaa_subnet_ids = list(map(lambda x: x.subnet_id, vpc.private_subnets))
         mwaa_environment = core.CfnResource(
             self,
             id="mwaa-environment",
@@ -618,6 +624,7 @@ class RosbagProcessor(core.Stack):
                 # PluginsS3Path: `s3: // ${dagBagBucket.bucketName} / plugins.zip
                 # RequirementsS3Path: `s3: // ${dagBagBucket.bucketName} / requirements.txt
                 "ExecutionRoleArn": mwaa_exec_role.role_arn,
+                # TODO: change to PRIVATE_ONLY
                 "WebserverAccessMode": "PUBLIC_ONLY",
                 "MaxWorkers": 25,
                 "EnvironmentClass": "mw1.large"
