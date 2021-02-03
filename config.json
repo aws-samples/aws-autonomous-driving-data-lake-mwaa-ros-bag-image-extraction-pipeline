@@ -13,6 +13,7 @@
   },
   "input-bucket-name": "vsi-rosbag-ingestion-bucket-1",
   "output-bucket-name": "vsi-rosbag-data-as-parquet-bucket-1",
+  "dag-bucket-name": "vsi-rosbag-dag-bucket-1",
   "environment-variables": {
     "s3_source_prefix": "$.key",
     "s3_source" : "$.bucket",

@@ -27,6 +27,7 @@ s3_filters = config["s3-filters"]
 default_environment_vars = config["environment-variables"]
 input_bucket_name = config["input-bucket-name"]
 output_bucket_name = config["output-bucket-name"]
+dag_bucket_name = config["dag-bucket-name"]
 
 app = core.App()
 
@@ -42,6 +43,7 @@ RosbagProcessor(
     s3_filters=s3_filters,
     input_bucket_name=input_bucket_name,
     output_bucket_name=output_bucket_name,
+    dag_bucket_name=dag_bucket_name
 )
 
 app.synth()

@@ -15,6 +15,7 @@ from aws_cdk import (
     aws_stepfunctions_tasks as tasks,
     aws_lambda,
     aws_lambda_event_sources as les,
+    aws_mwaa,
     aws_dynamodb as dynamodb,
     custom_resources as cr,
     core,
@@ -34,21 +35,23 @@ boto3.setup_default_session(profile_name=profile)
 account = boto3.client("sts").get_caller_identity().get("Account")
 region = boto3.session.Session().region_name
 
+
 class RosbagProcessor(core.Stack):
     def __init__(
-        self,
-        scope: core.Construct,
-        id: str,
-        image_name: str,
-        ecr_repository_name: str,
-        environment_vars: dict,
-        memory_limit_mib: int,
-        cpu: int,
-        timeout_minutes: int,
-        s3_filters: list,
-        input_bucket_name: str,
-        output_bucket_name: str,
-        **kwargs,
+            self,
+            scope: core.Construct,
+            id: str,
+            image_name: str,
+            ecr_repository_name: str,
+            environment_vars: dict,
+            memory_limit_mib: int,
+            cpu: int,
+            timeout_minutes: int,
+            s3_filters: list,
+            input_bucket_name: str,
+            output_bucket_name: str,
+            dag_bucket_name: str,
+            **kwargs,
     ) -> None:
         """
         Creates the following infrastructure:
@@ -139,7 +142,8 @@ class RosbagProcessor(core.Stack):
 
         dag_bucket = aws_s3.Bucket(
             self,
-            id="dag-bucket",
+            id="airflow-dag-bucket",
+            bucket_name=f"airflow-dags-{self.stack_name}-{self.account}",
             removal_policy=core.RemovalPolicy.DESTROY,
             encryption=aws_s3.BucketEncryption.KMS_MANAGED,
             block_public_access=aws_s3.BlockPublicAccess.BLOCK_ALL
@@ -550,4 +554,72 @@ class RosbagProcessor(core.Stack):
                 actions=["rekognition:DetectText", "rekognition:DetectFaces"],
                 resources=["*"],
             )
+        )
+
+        # MWAA execution role
+        arn_str = "arn:aws:s3:::"
+
+        mwaa_exec_role = aws_iam.Role(
+            self,
+            "mwaa_exec_role",
+            assumed_by=aws_iam.ServicePrincipal("airflow.amazonaws.com"),
+            managed_policies=[
+                aws_iam.ManagedPolicy.from_aws_managed_policy_name("job-function/DataScientist"),
+                aws_iam.ManagedPolicy.from_aws_managed_policy_name("AWSGlueConsoleFullAccess"),
+                aws_iam.ManagedPolicy.from_aws_managed_policy_name("AWSLambdaFullAccess"),
+                aws_iam.ManagedPolicy.from_aws_managed_policy_name("CloudWatchFullAccess"),
+            ],
+        )
+
+        mwaa_exec_role.assume_role_policy.add_statements(
+            aws_iam.PolicyStatement(
+                actions=["sts:AssumeRole"],
+                effect=aws_iam.Effect.ALLOW,
+                principals=[aws_iam.ServicePrincipal("airflow-env.amazonaws.com")]
+            )
+        )
+
+        mwaa_subnet_ids = list(map(lambda x: x.subnet_id, vpc.private_subnets))
+
+        mwaa_environment = core.CfnResource(
+            self,
+            id="mwaa-environment",
+            type="AWS::MWAA::Environment",
+            properties={
+                "Name": "mwaa-environment",
+                "NetworkConfiguration": {
+                    "SubnetIds": mwaa_subnet_ids,
+                    "SecurityGroupIds": [vpc.vpc_default_security_group]
+                },
+                "LoggingConfiguration": {
+                    "DagProcessingLogs": {
+                        "Enabled": "true",
+                        "LogLevel": "INFO"
+                    },
+                    "SchedulerLogs": {
+                        "Enabled": "true",
+                        "LogLevel": "INFO"
+                    },
+                    "WebserverLogs": {
+                        "Enabled": "true",
+                        "LogLevel": "INFO"
+                    },
+                    "WorkerLogs": {
+                        "Enabled": "true",
+                        "LogLevel": "INFO"
+                    },
+                    "TaskLogs": {
+                        "Enabled": "true",
+                        "LogLevel": "INFO"
+                    }
+                },
+                "SourceBucketArn": dag_bucket.bucket_arn,
+                "DagS3Path": f"s3://{dag_bucket.bucket_name}/dags",
+                # PluginsS3Path: `s3: // ${dagBagBucket.bucketName} / plugins.zip
+                # RequirementsS3Path: `s3: // ${dagBagBucket.bucketName} / requirements.txt
+                "ExecutionRoleArn": mwaa_exec_role.role_arn,
+                "WebserverAccessMode": "PUBLIC_ONLY",
+                "MaxWorkers": 25,
+                "EnvironmentClass": "mw1.large"
+            }
         )
