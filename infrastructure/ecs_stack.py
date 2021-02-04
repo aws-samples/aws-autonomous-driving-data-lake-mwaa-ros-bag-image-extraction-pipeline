@@ -562,9 +562,10 @@ class RosbagProcessor(core.Stack):
             "mwaa_exec_role",
             assumed_by=aws_iam.ServicePrincipal("airflow.amazonaws.com"),
             managed_policies=[
+                # TODO narrow down
                 aws_iam.ManagedPolicy.from_aws_managed_policy_name("job-function/DataScientist"),
-                aws_iam.ManagedPolicy.from_aws_managed_policy_name("AWSGlueConsoleFullAccess"),
-                aws_iam.ManagedPolicy.from_aws_managed_policy_name("AWSLambdaFullAccess"),
+                aws_iam.ManagedPolicy.from_aws_managed_policy_name("AmazonS3FullAccess"),
+                aws_iam.ManagedPolicy.from_aws_managed_policy_name("AmazonSQSFullAccess"),
                 aws_iam.ManagedPolicy.from_aws_managed_policy_name("CloudWatchFullAccess"),
             ],
         )
@@ -576,6 +577,48 @@ class RosbagProcessor(core.Stack):
                 principals=[aws_iam.ServicePrincipal("airflow-env.amazonaws.com")]
             )
         )
+
+        # TODO narrow down
+        mwaa_exec_role.add_to_policy(
+            aws_iam.PolicyStatement(
+                actions=[
+                    "logs:*",
+                ],
+                effect=aws_iam.Effect.ALLOW,
+                resources=["*"],
+            )
+        )
+
+        mwaa_exec_role.add_to_policy(
+            aws_iam.PolicyStatement(
+                actions=[
+                    "airflow:*",
+                ],
+                effect=aws_iam.Effect.ALLOW,
+                resources=["*"],
+            )
+        )
+
+        mwaa_exec_role.add_to_policy(
+            aws_iam.PolicyStatement(
+                actions=[
+                    "kms:Decrypt",
+                    "kms:DescribeKey",
+                    "kms:GenerateDataKey*",
+                    "kms:Encrypt"
+                ],
+                effect=aws_iam.Effect.ALLOW,
+                not_resources=[f"arn:aws:kmw:*:{self.account}:key/*"],
+                conditions={
+                    "StringLike": {
+                        "kms:ViaService": [
+                            f"sqs.{self.region}.amazonaws.com"
+                        ]
+                    }
+                }
+            )
+        )
+
 
         # MWAA bastion host
         mwaa_bastion = ec2.BastionHostLinux(
@@ -620,7 +663,7 @@ class RosbagProcessor(core.Stack):
                     }
                 },
                 "SourceBucketArn": dag_bucket.bucket_arn,
-                "DagS3Path": f"s3://{dag_bucket.bucket_name}/dags",
+                "DagS3Path": "dags",
                 # PluginsS3Path: `s3: // ${dagBagBucket.bucketName} / plugins.zip
                 # RequirementsS3Path: `s3: // ${dagBagBucket.bucketName} / requirements.txt
                 "ExecutionRoleArn": mwaa_exec_role.role_arn,
