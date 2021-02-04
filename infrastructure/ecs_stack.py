@@ -636,6 +636,12 @@ class RosbagProcessor(core.Stack):
             type="AWS::MWAA::Environment",
             properties={
                 "Name": "mwaa-environment",
+                "AirflowConfigurationOptions": {
+                    # TODO: this is DAG specific config & should not be wired into the MWAA environment
+                    #       where else can we put this? SecretsManager? Config?
+                    "bag.src": src_bucket.bucket_name,
+                    "bag.dest": dest_bucket.bucket_name
+                },
                 "NetworkConfiguration": {
                     "SubnetIds": mwaa_subnet_ids,
                     "SecurityGroupIds": [vpc.vpc_default_security_group]
@@ -664,7 +670,7 @@ class RosbagProcessor(core.Stack):
                 },
                 "SourceBucketArn": dag_bucket.bucket_arn,
                 "DagS3Path": "dags",
-                # PluginsS3Path: `s3: // ${dagBagBucket.bucketName} / plugins.zip
+                "PluginsS3Path": f"s3://{dag_bucket.bucket_name}/plugins/plugins.zip",
                 # RequirementsS3Path: `s3: // ${dagBagBucket.bucketName} / requirements.txt
                 "ExecutionRoleArn": mwaa_exec_role.role_arn,
                 # TODO: change to PRIVATE_ONLY
