@@ -61,10 +61,6 @@ def tag_bag(**kwargs):
 
     add_s3_tag(METADATA_PROCESSING_KEY, METADATA_PROCESSING_VALUE_IN_PROGRESS, bucket, key)
 
-    #xcom_push for the filename used by check cancel
-    name = key.rsplit('/', 1)
-    kwargs['ti'].xcom_push(key="file_name", value=name[1])
-
     return f"Successfully tagged {key} with tags {METADATA_PROCESSING_KEY}:{METADATA_PROCESSING_VALUE_IN_PROGRESS}."
 
 
