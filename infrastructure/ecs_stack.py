@@ -640,7 +640,10 @@ class RosbagProcessor(core.Stack):
                     # TODO: this is DAG specific config & should not be wired into the MWAA environment
                     #       where else can we put this? SecretsManager? Config?
                     "bag.src": src_bucket.bucket_name,
-                    "bag.dest": dest_bucket.bucket_name
+                    "bag.dest": dest_bucket.bucket_name,
+                    "private.subnets": private_subnets,
+                    "fargate.cluster": cluster.cluster_arn,
+                    "fargate.task": task_definition.task_definition_arn
                 },
                 "NetworkConfiguration": {
                     "SubnetIds": mwaa_subnet_ids,
@@ -670,7 +673,7 @@ class RosbagProcessor(core.Stack):
                 },
                 "SourceBucketArn": dag_bucket.bucket_arn,
                 "DagS3Path": "dags",
-                "PluginsS3Path": f"s3://{dag_bucket.bucket_name}/plugins/plugins.zip",
+                "PluginsS3Path": "plugins/plugins.zip",
                 # RequirementsS3Path: `s3: // ${dagBagBucket.bucketName} / requirements.txt
                 "ExecutionRoleArn": mwaa_exec_role.role_arn,
                 # TODO: change to PRIVATE_ONLY
