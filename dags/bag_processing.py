@@ -106,8 +106,11 @@ extraction_failed = DummyOperator(
     dag=dag,
 )
 
-label_images = DummyOperator(
+label_images = PythonOperator(
     task_id='label_images',
+    provide_context=True,
+    python_callable=processing.label_images,
+    op_kwargs={'bucket_dest': os.environ["AIRFLOW__BAG__DEST"]},
     dag=dag,
 )
 
