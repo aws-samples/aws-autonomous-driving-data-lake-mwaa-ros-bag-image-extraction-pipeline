@@ -58,9 +58,18 @@ determine_work = BranchPythonOperator(
     dag=dag,
 )
 
-tag_bag_file = PythonOperator(
-    task_id='tag_bag_file',
+tag_bag_file_in_process = PythonOperator(
+    task_id='tag_bag_file_in_process',
     provide_context=True,
+    op_kwargs={'tag_value': processing.METADATA_PROCESSING_VALUE_IN_PROGRESS},
+    python_callable=processing.tag_bag,
+    dag=dag,
+)
+
+tag_bag_file_failure = PythonOperator(
+    task_id='tag_bag_file_failure',
+    provide_context=True,
+    op_kwargs={'tag_value': processing.METADATA_PROCESSING_VALUE_FAILURE},
     python_callable=processing.tag_bag,
     dag=dag,
 )
@@ -79,6 +88,24 @@ extract_png = PythonOperator(
     dag=dag,
 )
 
+wait_for_extraction = BranchPythonOperator(
+    task_id='wait_for_extraction',
+    provide_context=True,
+    op_kwargs={'fargate_cluster': os.environ["AIRFLOW__FARGATE__CLUSTER"]},
+    python_callable=processing.wait_for_extraction,
+    dag=dag,
+)
+
+extraction_success = DummyOperator(
+    task_id='extraction_success',
+    dag=dag,
+)
+
+extraction_failed = DummyOperator(
+    task_id='extraction_failed',
+    dag=dag,
+)
+
 label_images = DummyOperator(
     task_id='label_images',
     dag=dag,
@@ -89,10 +116,12 @@ no_work = DummyOperator(
     dag=dag,
 )
 
-get_env_vars >> bag_file_sensor >> determine_work >> [no_work, tag_bag_file]
+get_env_vars >> bag_file_sensor >> determine_work >> [no_work, tag_bag_file_in_process]
 
-tag_bag_file >> extract_png >> label_images
+tag_bag_file_in_process >> extract_png >> wait_for_extraction >> [extraction_success, extraction_failed]
 
+extraction_success >> label_images
+extraction_failed >> tag_bag_file_failure
 
 if __name__ == "__main__":
     dag.cli()
