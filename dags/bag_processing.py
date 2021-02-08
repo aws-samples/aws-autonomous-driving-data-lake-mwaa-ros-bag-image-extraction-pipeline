@@ -74,6 +74,14 @@ tag_bag_file_failure = PythonOperator(
     dag=dag,
 )
 
+tag_bag_file_complete = PythonOperator(
+    task_id='tag_bag_file_complete',
+    provide_context=True,
+    op_kwargs={'tag_value': processing.METADATA_PROCESSING_VALUE_COMPLETE},
+    python_callable=processing.tag_bag,
+    dag=dag,
+)
+
 extract_png = PythonOperator(
     task_id='extract_png',
     provide_context=True,
@@ -110,7 +118,10 @@ label_images = PythonOperator(
     task_id='label_images',
     provide_context=True,
     python_callable=processing.label_images,
-    op_kwargs={'bucket_dest': os.environ["AIRFLOW__BAG__DEST"]},
+    op_kwargs={
+        'bucket_dest': os.environ["AIRFLOW__BAG__DEST"],
+        'table_dest': os.environ["AIRFLOW__DYNAMO__REK_RESULTS"]
+    },
     dag=dag,
 )
 
@@ -123,7 +134,7 @@ get_env_vars >> bag_file_sensor >> determine_work >> [no_work, tag_bag_file_in_p
 
 tag_bag_file_in_process >> extract_png >> wait_for_extraction >> [extraction_success, extraction_failed]
 
-extraction_success >> label_images
+extraction_success >> label_images >> tag_bag_file_complete
 extraction_failed >> tag_bag_file_failure
 
 if __name__ == "__main__":

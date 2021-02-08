@@ -676,6 +676,7 @@ class RosbagProcessor(core.Stack):
                     "bag.src": src_bucket.bucket_name,
                     "bag.dest": dest_bucket.bucket_name,
                     "private.subnets": ",".join(mwaa_subnet_ids),
+                    "dynamo.rek_results": rek_labels_db.table_name,
                     "fargate.cluster": cluster.cluster_arn,
                     "fargate.task_arn": task_definition.task_definition_arn,
                     "fargate.task_name": task_definition.default_container.container_name

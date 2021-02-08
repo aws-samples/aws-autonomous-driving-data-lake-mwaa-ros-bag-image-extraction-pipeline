@@ -174,7 +174,7 @@ def wait_for_extraction(**kwargs):
 #
 #   TODO: split responsibilities
 #
-def process_labels(file_labels, bucket, key):
+def process_labels(file_labels, bucket, key, table_target):
     import boto3
     import json
     import logging
@@ -188,7 +188,6 @@ def process_labels(file_labels, bucket, key):
 
     # TODO: pull from secrets manager
     frame_duration = 67
-    table = "RekResultsTable2"
 
     path_elems = key.split("/")
     file_elems = path_elems[-1].split(".")
@@ -229,7 +228,7 @@ def process_labels(file_labels, bucket, key):
     }
 
     # Put the entry into the table
-    dynamo.put_item(TableName=table, Item=item)
+    dynamo.put_item(TableName=table_target, Item=item)
 
     # Upated the table with each detection
     ped_cnt = 0
@@ -259,7 +258,7 @@ def process_labels(file_labels, bucket, key):
         #
         try:
             dynamo.update_item(
-                TableName=table,
+                TableName=table_target,
                 Key=db_key,
                 UpdateExpression=update_expression,
                 ConditionExpression=condition_expression,
@@ -270,7 +269,7 @@ def process_labels(file_labels, bucket, key):
 
     try:
         dynamo.update_item(
-            TableName=table,
+            TableName=table_target,
             Key=db_key,
             UpdateExpression=f"SET Ped_Count = :peds, Bike_Count  = :bikes, Motorbike_Count = :motorbikes ",
             ExpressionAttributeValues={
@@ -295,6 +294,7 @@ def label_images(**kwargs):
     # list PNG files in S3
     prefix = kwargs['ti'].xcom_pull(task_ids=f"bag_file_sensor", key=f"filename_s3_key")[:-4] + "/"
     bucket = kwargs['bucket_dest']
+    table = kwargs['table_dest']
     print(f"Will scan for files in s3://{bucket}/{prefix}")
 
     s3_client = boto3.client("s3")
@@ -314,5 +314,5 @@ def label_images(**kwargs):
             key = object["Key"]
             if key.endswith(".png"):
                 response = rek_client.detect_labels(Image={"S3Object": {"Bucket": bucket, "Name": key}})
-                process_labels(response["Labels"], bucket, key)
+                process_labels(response["Labels"], bucket, key, table)
 
