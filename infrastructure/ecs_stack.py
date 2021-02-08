@@ -8,6 +8,7 @@ from aws_cdk import (
     aws_events,
     aws_events_targets as targets,
     aws_iam,
+    aws_secretsmanager,
     aws_sns,
     aws_sns_subscriptions as sns_subs,
     aws_sqs,
@@ -592,7 +593,27 @@ class RosbagProcessor(core.Stack):
         mwaa_exec_role.add_to_policy(
             aws_iam.PolicyStatement(
                 actions=[
+                    "ecs:*",
+                ],
+                effect=aws_iam.Effect.ALLOW,
+                resources=["*"],
+            )
+        )
+
+        mwaa_exec_role.add_to_policy(
+            aws_iam.PolicyStatement(
+                actions=[
                     "airflow:*",
+                ],
+                effect=aws_iam.Effect.ALLOW,
+                resources=["*"],
+            )
+        )
+
+        mwaa_exec_role.add_to_policy(
+            aws_iam.PolicyStatement(
+                actions=[
+                    "iam:PassRole",
                 ],
                 effect=aws_iam.Effect.ALLOW,
                 resources=["*"],
@@ -628,6 +649,9 @@ class RosbagProcessor(core.Stack):
         )
         core.Tags.of(mwaa_bastion).add("airflow_function", "bastion")
 
+        # MWAA secrets
+        # mwaa_secrets = aws_secretsmanager.Secret()
+
         # MWAA environment
         mwaa_subnet_ids = list(map(lambda x: x.subnet_id, vpc.private_subnets))
         mwaa_environment = core.CfnResource(
@@ -641,9 +665,10 @@ class RosbagProcessor(core.Stack):
                     #       where else can we put this? SecretsManager? Config?
                     "bag.src": src_bucket.bucket_name,
                     "bag.dest": dest_bucket.bucket_name,
-                    "private.subnets": private_subnets,
+                    "private.subnets": ",".join(mwaa_subnet_ids),
                     "fargate.cluster": cluster.cluster_arn,
-                    "fargate.task": task_definition.task_definition_arn
+                    "fargate.task_arn": task_definition.task_definition_arn,
+                    "fargate.task_name": task_definition.default_container.container_name
                 },
                 "NetworkConfiguration": {
                     "SubnetIds": mwaa_subnet_ids,

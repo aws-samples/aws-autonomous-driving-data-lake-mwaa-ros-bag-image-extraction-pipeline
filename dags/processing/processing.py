@@ -79,20 +79,22 @@ def run_fargate_task(**kwargs):
 
     # TODO where to pull this config, e.g. SecretsManager?
     dest_bucket = kwargs['bucket_dest']
-    private_subnets = kwargs['private_subnets']
+    private_subnets = kwargs['private_subnets'].split(",")
     fargate_cluster = kwargs['fargate_cluster']
-    fargate_task = kwargs['fargate_task']
+    fargate_task_arn = kwargs['fargate_task_arn']
+    fargate_task_name = kwargs['fargate_task_name']
 
     client = boto3.client('ecs')
     client.run_task(
         cluster=fargate_cluster,
         launchType='FARGATE',
-        taskDefinition=fargate_task,
+        taskDefinition=fargate_task_arn,
         count=1,
         platformVersion='LATEST',
         overrides={
             'containerOverrides': [
                 {
+                    'name': fargate_task_name,
                     'environment': [
                         {
                             'name': 's3_source',
@@ -116,7 +118,7 @@ def run_fargate_task(**kwargs):
         },
         networkConfiguration={
             'awsvpcConfiguration': {
-                'subnets': [private_subnets],
+                'subnets': private_subnets,
                 'assignPublicIp': 'DISABLED'
             }
         }

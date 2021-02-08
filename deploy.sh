@@ -19,6 +19,7 @@ then
     export repo_url=$aws_account_id.dkr.ecr.$region.amazonaws.com/$REPO_NAME
     docker build ./service -t $IMAGE_NAME:latest
     last_image_id=$(docker images | awk '{print $3}' | awk 'NR==2')
+    aws ecr --profile "$profile" get-login-password --region "$region" | docker login --username AWS --password-stdin "$aws_account_id.dkr.ecr.$region.amazonaws.com"
     docker tag $last_image_id $repo_url
     echo docker push $repo_url
     aws ecr describe-repositories --repository-names $REPO_NAME --region $region || aws ecr create-repository --repository-name $REPO_NAME --region $region

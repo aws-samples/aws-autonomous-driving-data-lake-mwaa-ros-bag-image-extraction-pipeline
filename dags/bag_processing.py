@@ -71,7 +71,8 @@ extract_png = PythonOperator(
     op_kwargs={
         'bucket_dest': os.environ["AIRFLOW__BAG__DEST"],
         'fargate_cluster': os.environ["AIRFLOW__FARGATE__CLUSTER"],
-        'fargate_task': os.environ["AIRFLOW__FARGATE__TASK"],
+        'fargate_task_arn': os.environ["AIRFLOW__FARGATE__TASK_ARN"],
+        'fargate_task_name': os.environ["AIRFLOW__FARGATE__TASK_NAME"],
         'private_subnets': os.environ['AIRFLOW__PRIVATE__SUBNETS']
     },
     python_callable=processing.run_fargate_task,
