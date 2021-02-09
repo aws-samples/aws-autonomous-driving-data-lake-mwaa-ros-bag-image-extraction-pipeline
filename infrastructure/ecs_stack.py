@@ -60,7 +60,6 @@ class RosbagProcessor(core.Stack):
             2 S3 Buckets
                 - "src" bucket will be monitored for incoming data, and each incoming file will trigger an ECS Task
                 - "dest" bucket will be the destination for saving processed data from the ECS Task
-                # TODO hschoen add S3 bucket for DAGS
                 - "dags" bucket will contain MWAA dags
 
                 - These bucket names are automatically passed as environment variables to your docker container
@@ -70,7 +69,6 @@ class RosbagProcessor(core.Stack):
                     src_bucket = os.environ["s3_source"]
                     dest_bucket = os.environ["s3_destination"]
 
-            # TODO hschoen
             MWAA environment
 
             ECS Fargate Cluster
@@ -298,122 +296,7 @@ class RosbagProcessor(core.Stack):
             backoff_rate=1, interval=core.Duration.seconds(60), max_attempts=1920
         )
 
-        state_logs = aws_logs.LogGroup(self, "stateLogs")
-        state_machine = sfn.StateMachine(
-            self,
-            "RunTaskStateMachine",
-            definition=run_task,
-            timeout=core.Duration.minutes(timeout_minutes),
-            logs=sfn.LogOptions(destination=state_logs),
-        )
-
-        state_machine.grant_task_response(ecs_task_role)
-
-        input_bag_queue = aws_sqs.Queue(
-            self, "inputBagQueue", visibility_timeout=core.Duration.minutes(5)
-        )
-        # send .png object created events to our SQS input queue
-        src_bucket.add_event_notification(
-            aws_s3.EventType.OBJECT_CREATED,
-            s3n.SqsDestination(input_bag_queue),
-            aws_s3.NotificationKeyFilter(suffix="bag"),
-        )
-
-        # Create the SQS queue for input/results jobs and SNS for job completion notifications
-        dlq = aws_sqs.Queue(self, "dlq")
-        rek_job_queue = aws_sqs.Queue(
-            self, "rekJobQueue", visibility_timeout=core.Duration.minutes(2)
-        )
-        rek_results_queue = aws_sqs.Queue(
-            self, "rekResultQueue", visibility_timeout=core.Duration.minutes(5)
-        )
-
-        ## TESTING - this lamda is for development and allows us to push a bunch of .bag files through
-        # without having to copy them into teh src bucket. Create a manifest and then use that with 
-        # an S3 batch job to run this.
-        s3_batch_lambda = aws_lambda.Function(
-            self,
-            "S3Batchprocessor",
-            code=aws_lambda.Code.from_asset("./infrastructure/S3Batch"),
-            environment={
-                "bag_queue_url": input_bag_queue.queue_url,
-                "job_queue_url": rek_job_queue.queue_url,
-            },
-            memory_size=3008,
-            timeout=core.Duration.minutes(5),
-            vpc=vpc,
-            retry_attempts=0,
-            handler="s3batch.lambda_handler",
-            runtime=aws_lambda.Runtime("python3.7", supports_inline_code=True),
-            security_groups=fs.connections.security_groups,
-        )
-
-        input_bag_queue.grant_send_messages(s3_batch_lambda.role)
-        rek_job_queue.grant_send_messages(s3_batch_lambda.role)
-        s3_batch_lambda.add_to_role_policy(
-            aws_iam.PolicyStatement(
-                actions=[
-                    "kms:Decrypt",
-                    "kms:Encrypt",
-                    "kms:ReEncrypt*",
-                    "kms:DescribeKey",
-                    "kms:GenerateDataKey",
-                ],
-                resources=["*"],
-            )
-        )
-        s3_batch_lambda.add_to_role_policy(
-            aws_iam.PolicyStatement(
-                actions=["s3:List*", "s3:Get*", "s3:PutObject"], resources=["*"]
-            )
-        )
-
-        bag_queue_lambda = aws_lambda.Function(
-            self,
-            "BagQueueProcessor",
-            code=aws_lambda.Code.from_asset("./infrastructure/bag-queue-proc"),
-            environment={
-                "bag_queue_url": input_bag_queue.queue_url,
-                "state_machine_arn": state_machine.state_machine_arn,
-                "dest_bucket": dest_bucket.bucket_name,
-            },
-            memory_size=3008,
-            timeout=core.Duration.minutes(5),
-            vpc=vpc,
-            retry_attempts=0,
-            handler="bag-queue-proc.lambda_handler",
-            runtime=aws_lambda.Runtime("python3.7", supports_inline_code=True),
-            security_groups=fs.connections.security_groups,
-        )
-        # SQS queue of .bag files to be processed
-        bag_queue_lambda.add_event_source(les.SqsEventSource(input_bag_queue))
-        input_bag_queue.grant_consume_messages(s3_batch_lambda.role)
-        bag_queue_lambda.add_to_role_policy(
-            aws_iam.PolicyStatement(
-                actions=[
-                    "kms:Decrypt",
-                    "kms:Encrypt",
-                    "kms:ReEncrypt*",
-                    "kms:DescribeKey",
-                    "kms:GenerateDataKey",
-                ],
-                resources=["*"],
-            )
-        )
-        bag_queue_lambda.add_to_role_policy(
-            aws_iam.PolicyStatement(
-                actions=["s3:List*", "s3:Get*", "s3:PutObject"], resources=["*"]
-            )
-        )
-        bag_queue_lambda.add_to_role_policy(
-            aws_iam.PolicyStatement(
-                actions=["states:StartExecution"],
-                resources=[state_machine.state_machine_arn],
-            )
-        )
-
         ## setup the rekogition labelling pipeline..
-
         # create a DynamoDB table to hold the rseults
         rek_labels_db = dynamodb.Table(
             self,
@@ -435,63 +318,6 @@ class RosbagProcessor(core.Stack):
                 name="mp4_file", type=dynamodb.AttributeType.STRING
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-        )
-
-        # send .png object created events to our SQS input queue
-        dest_bucket.add_event_notification(
-            aws_s3.EventType.OBJECT_CREATED,
-            s3n.SqsDestination(rek_job_queue),
-            aws_s3.NotificationKeyFilter(suffix="png"),
-        )
-
-        # Lambda to call Rekogition DetectLabels API syncronously 
-        process_rek_sync_lambda = aws_lambda.Function(
-            self,
-            "RekSyncProcessor",
-            code=aws_lambda.Code.from_asset("./infrastructure/process-queue-sync"),
-            environment={
-                "job_queue_url": rek_job_queue.queue_url,
-                "results_table": rek_labels_db.table_name,
-                "monitor_table": rek_monitor_db.table_name,
-                "frame_duration": "67",
-            },
-            memory_size=3008,
-            # reserved_concurrent_executions=20,
-            timeout=core.Duration.minutes(2),
-            vpc=vpc,
-            retry_attempts=0,
-            handler="process-queue-sync.lambda_handler",
-            runtime=aws_lambda.Runtime("python3.7", supports_inline_code=True),
-            security_groups=fs.connections.security_groups,
-        )
-
-        process_rek_sync_lambda.add_event_source(les.SqsEventSource(rek_job_queue))
-        rek_labels_db.grant_read_write_data(process_rek_sync_lambda.role)
-        rek_monitor_db.grant_read_write_data(process_rek_sync_lambda.role)
-        process_rek_sync_lambda.add_to_role_policy(
-            aws_iam.PolicyStatement(
-                actions=[
-                    "rekognition:DetectLabels",
-                ],
-                resources=["*"],
-            )
-        )
-        process_rek_sync_lambda.add_to_role_policy(
-            aws_iam.PolicyStatement(
-                actions=[
-                    "kms:Decrypt",
-                    "kms:Encrypt",
-                    "kms:ReEncrypt*",
-                    "kms:DescribeKey",
-                    "kms:GenerateDataKey",
-                ],
-                resources=["*"],
-            )
-        )
-        process_rek_sync_lambda.add_to_role_policy(
-            aws_iam.PolicyStatement(
-                actions=["s3:List*", "s3:Get*", "s3:PutObject"], resources=["*"]
-            )
         )
 
         # Lambda to anonymize the images which contain a VRU
