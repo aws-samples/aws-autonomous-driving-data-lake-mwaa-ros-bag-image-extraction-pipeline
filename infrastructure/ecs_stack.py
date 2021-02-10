@@ -536,9 +536,8 @@ class RosbagProcessor(core.Stack):
                 "SourceBucketArn": dag_bucket.bucket_arn,
                 "DagS3Path": "dags",
                 "PluginsS3Path": "plugins/plugins.zip",
-                # RequirementsS3Path: `s3: // ${dagBagBucket.bucketName} / requirements.txt
+                "RequirementsS3Path": "requirements/requirements.txt",
                 "ExecutionRoleArn": mwaa_exec_role.role_arn,
-                # TODO: change to PRIVATE_ONLY
                 "WebserverAccessMode": "PUBLIC_ONLY",
                 "MaxWorkers": 25,
                 "EnvironmentClass": "mw1.large"

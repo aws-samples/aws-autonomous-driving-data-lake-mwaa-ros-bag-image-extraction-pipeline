@@ -282,6 +282,23 @@ def process_labels(file_labels, bucket, key, table_target):
         logging.warning(e)
 
 
+def list_objects(bucket, prefix):
+    import boto3
+    s3_client = boto3.client("s3")
+
+    print(f"Will scan for files in s3://{bucket}/{prefix}")
+    paginator = s3_client.get_paginator('list_objects_v2')
+    iterator = paginator.paginate(
+        Bucket=bucket,
+        Prefix=prefix,
+        PaginationConfig={
+            "PageSize": 100
+        }
+    )
+
+    return iterator
+
+
 def label_images(**kwargs):
     """
     Sends images to Rekognition for labeling
@@ -295,17 +312,8 @@ def label_images(**kwargs):
     prefix = kwargs['ti'].xcom_pull(task_ids=f"bag_file_sensor", key=f"filename_s3_key")[:-4] + "/"
     bucket = kwargs['bucket_dest']
     table = kwargs['table_dest']
-    print(f"Will scan for files in s3://{bucket}/{prefix}")
 
-    s3_client = boto3.client("s3")
-    paginator = s3_client.get_paginator('list_objects_v2')
-    iterator = paginator.paginate(
-        Bucket=bucket,
-        Prefix=prefix,
-        PaginationConfig={
-            "PageSize": 100
-        }
-    )
+    iterator = list_objects(bucket, prefix)
 
     # send to Rekognition for labeling
     rek_client = boto3.client("rekognition")
@@ -315,4 +323,88 @@ def label_images(**kwargs):
             if key.endswith(".png"):
                 response = rek_client.detect_labels(Image={"S3Object": {"Bucket": bucket, "Name": key}})
                 process_labels(response["Labels"], bucket, key, table)
+
+
+def save_to_s3(image, bucket, key):
+    import boto3
+
+    s3 = boto3.client("s3")
+    s3.upload_fileobj(
+        image,
+        bucket,
+        f"bounding_boxes/{key}"
+    )
+
+
+def draw_bounding_box(bucket, json_key):
+    """
+    Given a Rekognition json file all detected bounding boxes will be written into the related image
+
+    :param bucket:
+    :param key:
+    :return:
+    """
+
+    import boto3
+    import json
+    import io
+    from PIL import Image, ImageDraw
+
+    s3 = boto3.resource("s3")
+
+    # load json from S3
+    json_object = s3.Object(bucket, json_key)
+    json_content = json.loads(json_object.get()['Body'].read().decode('utf-8'))
+
+    # load matching image key
+    png_key = json_key.replace(".json", ".png")
+    stream = io.BytesIO(s3.Object(bucket, png_key).get()['Body'].read())
+    image = Image.open(stream)
+
+    imgWidth, imgHeight = image.size
+    draw = ImageDraw.Draw(image)
+
+    for item in json_content:
+        for inst in item["Instances"]:
+            box = inst['BoundingBox']
+            left = imgWidth * box['Left']
+            top = imgHeight * box['Top']
+            width = imgWidth * box['Width']
+            height = imgHeight * box['Height']
+
+            points = (
+                (left, top),
+                (left + width, top),
+                (left + width, top + height),
+                (left, top + height),
+                (left, top)
+
+            )
+            draw.line(points, fill='#00d400', width=2)
+            in_mem_image = io.BytesIO()
+            image.save(in_mem_image, format=image.format)
+            in_mem_image.seek(0)
+
+            save_to_s3(in_mem_image, bucket, png_key)
+
+
+
+
+def draw_bounding_boxes(**kwargs):
+    """
+    Draws images with bounding boxes of the objects Rekognition found
+
+    :param kwargs:
+    :return:
+    """
+    # list PNG files in S3
+    prefix = kwargs['ti'].xcom_pull(task_ids=f"bag_file_sensor", key=f"filename_s3_key")[:-4] + "/"
+    bucket = kwargs['bucket_dest']
+
+    iterator = list_objects(bucket, prefix)
+    for page in iterator:
+        for object in page["Contents"]:
+            key = object["Key"]
+            if key.endswith(".json"):
+                draw_bounding_box(bucket, key)
 

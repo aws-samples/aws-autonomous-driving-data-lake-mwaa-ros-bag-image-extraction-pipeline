@@ -125,6 +125,16 @@ label_images = PythonOperator(
     dag=dag,
 )
 
+draw_bounding_boxes = PythonOperator(
+    task_id='draw_bounding_boxes',
+    provide_context=True,
+    python_callable=processing.draw_bounding_boxes,
+    op_kwargs={
+        'bucket_dest': os.environ["AIRFLOW__BAG__DEST"]
+    },
+    dag=dag,
+)
+
 no_work = DummyOperator(
     task_id='no_work',
     dag=dag,
@@ -134,7 +144,7 @@ get_env_vars >> bag_file_sensor >> determine_work >> [no_work, tag_bag_file_in_p
 
 tag_bag_file_in_process >> extract_png >> wait_for_extraction >> [extraction_success, extraction_failed]
 
-extraction_success >> label_images >> tag_bag_file_complete
+extraction_success >> label_images >> draw_bounding_boxes >> tag_bag_file_complete
 extraction_failed >> tag_bag_file_failure
 
 if __name__ == "__main__":
