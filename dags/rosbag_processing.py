@@ -21,7 +21,7 @@ args = {
 }
 
 dag = DAG(
-    dag_id='bag_processing',
+    dag_id='rosbag_processing',
     default_args=args,
     schedule_interval='*/10 * * * *',
     dagrun_timeout=timedelta(minutes=60),
