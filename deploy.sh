@@ -22,7 +22,7 @@ then
     aws ecr --profile "$profile" get-login-password --region "$region" | docker login --username AWS --password-stdin "$aws_account_id.dkr.ecr.$region.amazonaws.com"
     docker tag $last_image_id $repo_url
     echo docker push $repo_url
-    aws ecr describe-repositories --repository-names $REPO_NAME --region $region || aws ecr create-repository --repository-name $REPO_NAME --region $region
+    aws ecr describe-repositories --profile "$profile" --repository-names $REPO_NAME --region $region || aws ecr create-repository --profile "$profile" --repository-name $REPO_NAME --region $region
     docker push $repo_url
 else
   echo Skipping build
