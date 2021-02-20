@@ -21,11 +21,12 @@ from aws_cdk import (
     custom_resources as cr,
     core,
     aws_logs,
+    aws_s3_deployment,
 )
 
 import boto3
 import os
-import json
+from botocore.exceptions import ClientError
 
 from os import path
 from os.path import dirname, abspath
@@ -146,6 +147,22 @@ class RosbagProcessor(core.Stack):
             removal_policy=core.RemovalPolicy.DESTROY,
             encryption=aws_s3.BucketEncryption.KMS_MANAGED,
             block_public_access=aws_s3.BlockPublicAccess.BLOCK_ALL
+        )
+
+        # Upload MWAA files to S3
+        s3_deployment = aws_s3_deployment.BucketDeployment(
+            self,
+            id="airflow-dag-plugins",
+            destination_bucket=dag_bucket,
+            sources=[aws_s3_deployment.Source.asset(path.join(dirname(abspath(__file__)), '../plugins'))],
+            destination_key_prefix="plugins"
+        )
+        s3_deployment = aws_s3_deployment.BucketDeployment(
+            self,
+            id="airflow-dag-requirements",
+            destination_bucket=dag_bucket,
+            sources=[aws_s3_deployment.Source.asset(path.join(dirname(abspath(__file__)), '../requirements'))],
+            destination_key_prefix="requirements"
         )
 
         # Create VPC and Fargate Cluster
@@ -475,7 +492,6 @@ class RosbagProcessor(core.Stack):
                 }
             )
         )
-
 
         # MWAA bastion host
         mwaa_bastion = ec2.BastionHostLinux(
