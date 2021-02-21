@@ -11,14 +11,15 @@ from datetime import timedelta
 from sensors.s3_metadata_sensor import S3MetadataSensor
 from processing import processing
 
-
-def print_env_vars():
-    for key in os.environ.keys():
+def get_env_vars():
+    key in os.environ.keys():
         print(f"{key} -> {os.environ[key]}")
 
 args = {
     'owner': 'hschoen@amazon.com'
 }
+
+
 
 dag = DAG(
     dag_id='rosbag_processing',
@@ -32,13 +33,13 @@ dag = DAG(
 
 get_env_vars = PythonOperator(
     task_id='get_env_vars',
-    python_callable=print_env_vars
+    python_callable=get_env_vars
 )
 
 bag_file_sensor = S3MetadataSensor(
     task_id='bag_file_sensor',
     bucket_key=f'*.bag',
-    bucket_name=os.environ["AIRFLOW__BAG__SRC"],
+    bucket_name=processing.get_parameter("/mwaa/rosbag/bag-src"),
     wildcard_match=True,
     metadata_key=processing.METADATA_PROCESSING_KEY,
     metadata_values=[processing.METADATA_PROCESSING_VALUE_FAILURE,
@@ -86,11 +87,11 @@ extract_png = PythonOperator(
     task_id='extract_png',
     provide_context=True,
     op_kwargs={
-        'bucket_dest': os.environ["AIRFLOW__BAG__DEST"],
-        'fargate_cluster': os.environ["AIRFLOW__FARGATE__CLUSTER"],
-        'fargate_task_arn': os.environ["AIRFLOW__FARGATE__TASK_ARN"],
-        'fargate_task_name': os.environ["AIRFLOW__FARGATE__TASK_NAME"],
-        'private_subnets': os.environ['AIRFLOW__PRIVATE__SUBNETS']
+        'bucket_dest': processing.get_parameter("/mwaa/rosbag/bag-dest"),
+        'fargate_cluster': processing.get_parameter("/mwaa/rosbag/fargate-cluster-arn"),
+        'fargate_task_arn': processing.get_parameter("/mwaa/rosbag/task-definition-arn"),
+        'fargate_task_name': processing.get_parameter("/mwaa/rosbag/fargate-cluster-arn"),
+        'private_subnets': processing.get_parameter("/mwaa/rosbag/task-definition-default-container-name")
     },
     python_callable=processing.run_fargate_task,
     dag=dag,
@@ -99,7 +100,7 @@ extract_png = PythonOperator(
 wait_for_extraction = BranchPythonOperator(
     task_id='wait_for_extraction',
     provide_context=True,
-    op_kwargs={'fargate_cluster': os.environ["AIRFLOW__FARGATE__CLUSTER"]},
+    op_kwargs={'fargate_cluster': processing.get_parameter("/mwaa/rosbag/fargate-cluster-arn")},
     python_callable=processing.wait_for_extraction,
     dag=dag,
 )
@@ -119,8 +120,8 @@ label_images = PythonOperator(
     provide_context=True,
     python_callable=processing.label_images,
     op_kwargs={
-        'bucket_dest': os.environ["AIRFLOW__BAG__DEST"],
-        'table_dest': os.environ["AIRFLOW__DYNAMO__REK_RESULTS"]
+        'bucket_dest': processing.get_parameter("/mwaa/rosbag/bag-dest"),
+        'table_dest': processing.get_parameter("/mwaa/rosbag/dynamo-rek-results")
     },
     dag=dag,
 )
@@ -130,7 +131,7 @@ draw_bounding_boxes = PythonOperator(
     provide_context=True,
     python_callable=processing.draw_bounding_boxes,
     op_kwargs={
-        'bucket_dest': os.environ["AIRFLOW__BAG__DEST"]
+        'bucket_dest': processing.get_parameter("/mwaa/rosbag/bag-dest")
     },
     dag=dag,
 )

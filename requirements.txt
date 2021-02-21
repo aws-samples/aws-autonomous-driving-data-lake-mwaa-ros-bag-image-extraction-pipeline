@@ -13,4 +13,5 @@ aws_cdk.aws_lambda_event_sources==1.90.0
 aws_cdk.aws_lambda==1.90.0
 aws_cdk.aws_mwaa==1.90.0
 aws_cdk.aws_s3_deployment==1.90.0
+aws_cdk.aws_ssm==1.90.0
 boto3

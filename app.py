@@ -4,10 +4,6 @@ from aws_cdk import core
 from infrastructure.ecs_stack import RosbagProcessor
 import os
 import json
-import zipfile
-
-#zip plugin
-zipfile.ZipFile('plugins/plugins.zip', mode='w').write("plugins/s3_metadata_plugin.py")
 
 # Load config
 project_dir = os.path.dirname(os.path.abspath(__file__))

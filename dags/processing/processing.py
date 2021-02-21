@@ -2,7 +2,7 @@ METADATA_PROCESSING_KEY="processing.status"
 METADATA_PROCESSING_VALUE_FAILURE="failure"
 METADATA_PROCESSING_VALUE_COMPLETE="complete"
 METADATA_PROCESSING_VALUE_IN_PROGRESS="in progress"
-
+import boto3
 def add_s3_tag(tag_key, tag_value, bucket, key):
     import boto3
 
@@ -407,4 +407,9 @@ def draw_bounding_boxes(**kwargs):
             key = object["Key"]
             if key.endswith(".json"):
                 draw_bounding_box(bucket, key)
+
+def get_parameter(parameter):
+    ssm = boto3.client('ssm')
+    parameter = ssm.get_parameter(Name='/mwaa/rosbag/bag-src')
+    return(parameter['Parameter']['Value'])
 
