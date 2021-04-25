@@ -18,16 +18,8 @@ print(config)
 image_name = config["image-name"]
 stack_id = config["stack-id"]
 ecr_repository_name = config["ecr-repository-name"]
-
 cpu = config["cpu"]
 memory_limit_mib = config["memory-limit-mib"]
-timeout_minutes = config["timeout-minutes"]
-s3_filters = config["s3-filters"]
-
-default_environment_vars = config["environment-variables"]
-input_bucket_name = config["input-bucket-name"]
-output_bucket_name = config["output-bucket-name"]
-dag_bucket_name = config["dag-bucket-name"]
 
 app = core.App()
 
@@ -35,15 +27,9 @@ RosbagProcessor(
     app,
     stack_id,
     image_name=image_name,
-    environment_vars=default_environment_vars,
     ecr_repository_name=ecr_repository_name,
     cpu=cpu,
-    memory_limit_mib=memory_limit_mib,
-    timeout_minutes=timeout_minutes,
-    s3_filters=s3_filters,
-    input_bucket_name=input_bucket_name,
-    output_bucket_name=output_bucket_name,
-    dag_bucket_name=dag_bucket_name
+    memory_limit_mib=memory_limit_mib
 )
 
 app.synth()

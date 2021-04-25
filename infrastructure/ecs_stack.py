@@ -28,14 +28,8 @@ class RosbagProcessor(core.Stack):
             id: str,
             image_name: str,
             ecr_repository_name: str,
-            environment_vars: dict,
             memory_limit_mib: int,
             cpu: int,
-            timeout_minutes: int,
-            s3_filters: list,
-            input_bucket_name: str,
-            output_bucket_name: str,
-            dag_bucket_name: str,
             **kwargs,
     ) -> None:
         """
@@ -181,7 +175,9 @@ class RosbagProcessor(core.Stack):
             container_name,
             image=img,
             memory_limit_mib=memory_limit_mib,
-            environment={"topics_to_extract": "/tf"},
+            environment={
+                "topics_to_extract": "/tf"
+            },
             logging=logs,
         )
 

@@ -3,20 +3,5 @@
   "image-name": "my-vsi-ros-image",
   "stack-id": "rosbag-processing-stack",
   "cpu": 4096,
-  "memory-limit-mib": 12288,
-  "timeout-minutes": 480,
-  "s3-filters": {
-    "prefix": [],
-    "suffix": [
-      ".bag"
-    ]
-  },
-  "input-bucket-name": "vsi-rosbag-ingestion-bucket-1",
-  "output-bucket-name": "vsi-rosbag-data-as-parquet-bucket-1",
-  "dag-bucket-name": "vsi-rosbag-dag-bucket-1",
-  "environment-variables": {
-    "s3_source_prefix": "$.key",
-    "s3_source" : "$.bucket",
-    "s3_destination" : "$.dest_bucket"
-  }
+  "memory-limit-mib": 12288
 }
