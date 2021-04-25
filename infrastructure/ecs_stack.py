@@ -2,36 +2,19 @@ from aws_cdk import (
     aws_ec2 as ec2,
     aws_s3,
     aws_s3_deployment as s3deploy,
-    aws_s3_notifications as s3n,
     aws_ecs as ecs,
     aws_ecr as ecr,
-    aws_efs as efs,
-    aws_events,
-    aws_events_targets as targets,
     aws_iam,
     aws_secretsmanager,
-    aws_sns,
-    aws_sns_subscriptions as sns_subs,
-    aws_sqs,
-    aws_stepfunctions as sfn,
-    aws_stepfunctions_tasks as tasks,
-    aws_lambda,
-    aws_lambda_event_sources as les,
     aws_mwaa,
     aws_dynamodb as dynamodb,
-    custom_resources as cr,
     core,
     aws_logs,
 )
 
 import boto3
 import os
-import json
 
-from os import path
-from os.path import dirname, abspath
-
-# TODO read profile from env
 profile = os.environ["AWS_PROFILE"]
 boto3.setup_default_session(profile_name=profile)
 account = boto3.client("sts").get_caller_identity().get("Account")
@@ -92,34 +75,8 @@ class RosbagProcessor(core.Stack):
             ECS Log Group for the ECS Task
                 f'{image_name}-log-group'
 
-            Step Function to execute the ECSRunFargateTask command
-
-            Lambda Function to proces an S3 batch job.
-                - This is used for development so we can repetedly run .bag files though the pipeline
-
-            SQS queue of bag files waiting to be extracted by a Fargate task. This is written to by the
-            S£ batch lambda and is also subscribed to S3 PUT events in the source bucket
-
-            Lamda Function to pull .bag file details from the SQS queue and start the StepFunction
-
-            Trigger to take .png files in the destination bucket and put them into an SQS queue of Rekogition labelling tasks
-
-            Lambda Function to pull png details from the SQS queue and call Rekognition synchronously to label the images in the video. JSON 
-            containing the labels is written back to S3
-
-            SQS queue, subscribed to the S3 .json PUT events
-
-            Lambda Function to pull the label data from Rekognition using the job IDs. This gets the labels for each frames,
-                calculates which .png files corresponds to a particular frame and saves one .json file of
-
-
         :param scope:
         :param id:
-        :param image_name:
-        :param image_dir:
-        :param build_args:
-        :param memory_limit_mib: RAM to allocate per task
-        :param cpu: CPUs to allocate per task
         :param kwargs:
         """
         super().__init__(scope, id, **kwargs)
@@ -150,41 +107,17 @@ class RosbagProcessor(core.Stack):
         )
 
         # Create VPC and Fargate Cluster
-        # NOTE: Limit AZs to avoid reaching resource quotas
         vpc = ec2.Vpc(self, f"MyVpc", max_azs=2)
 
-        # Add VPC endpoints for SSM
+        # Add VPC endpoints
         vpc.add_interface_endpoint("ecr", service=ec2.InterfaceVpcEndpointAwsService.ECR)
         vpc.add_interface_endpoint("ecr_docker", service=ec2.InterfaceVpcEndpointAwsService.ECR_DOCKER)
         vpc.add_interface_endpoint("ec2_messages", service=ec2.InterfaceVpcEndpointAwsService.EC2_MESSAGES)
         vpc.add_interface_endpoint("cloudwatch", service=ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH)
         vpc.add_interface_endpoint("cloudwatch_logs", service=ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS)
-
-        # Add VPC endpoints for SSM
         vpc.add_gateway_endpoint("s3", service=ec2.GatewayVpcEndpointAwsService('s3'))
 
-
         private_subnets = ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE)
-
-        # EFS
-        fs = efs.FileSystem(
-            self,
-            "efs",
-            vpc=vpc,
-            removal_policy=core.RemovalPolicy.DESTROY,
-            throughput_mode=efs.ThroughputMode.BURSTING,
-            performance_mode=efs.PerformanceMode.MAX_IO,
-        )
-
-        access_point = fs.add_access_point(
-            "AccessPoint",
-            path="/lambda",
-            create_acl=efs.Acl(owner_uid="1001", owner_gid="1001", permissions="750"),
-            posix_user=efs.PosixUser(uid="1001", gid="1001"),
-        )
-
-        # ECS Task Role
-        arn_str = "arn:aws:s3:::"
 
         ecs_task_role = aws_iam.Role(
             self,
@@ -217,23 +150,6 @@ class RosbagProcessor(core.Stack):
         ecs_task_role.add_to_policy(
             aws_iam.PolicyStatement(
                 actions=["s3:List*", "s3:PutObject*"], resources=["*"]
-            )
-        )
-
-        ecs_task_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                actions=["*"], resources=[access_point.access_point_arn]
-            )
-        )
-
-        ecs_task_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                actions=[
-                    "elasticfilesystem:ClientMount",
-                    "elasticfilesystem:ClientWrite",
-                    "elasticfilesystem:DescribeMountTargets",
-                ],
-                resources=["*"],
             )
         )
 
@@ -278,38 +194,8 @@ class RosbagProcessor(core.Stack):
             vpc=vpc,
         )
 
-        run_task = tasks.EcsRunTask(
-            self,
-            "fargatetask",
-            assign_public_ip=False,
-            subnets=private_subnets,
-            cluster=cluster,
-            launch_target=tasks.EcsFargateLaunchTarget(
-                platform_version=ecs.FargatePlatformVersion.VERSION1_4
-            ),
-            task_definition=task_definition,
-            container_overrides=[
-                tasks.ContainerOverride(
-                    container_definition=task_definition.default_container,
-                    environment=[
-                        tasks.TaskEnvironmentVariable(
-                            name=k, value=sfn.JsonPath.string_at(v)
-                        )
-                        for k, v in environment_vars.items()
-                    ],
-                )
-            ],
-            integration_pattern=sfn.IntegrationPattern.RUN_JOB,
-            input_path=sfn.JsonPath.entire_payload,
-            output_path=sfn.JsonPath.entire_payload,
-            timeout=core.Duration.minutes(timeout_minutes),
-        )
-        run_task.add_retry(
-            backoff_rate=1, interval=core.Duration.seconds(60), max_attempts=1920
-        )
-
         ## setup the rekogition labelling pipeline..
-        # create a DynamoDB table to hold the rseults
+        # create a DynamoDB table to hold the results
         rek_labels_db = dynamodb.Table(
             self,
             "RekResultsTable2",
@@ -330,69 +216,6 @@ class RosbagProcessor(core.Stack):
                 name="mp4_file", type=dynamodb.AttributeType.STRING
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
-        )
-
-        # Lambda to anonymize the images which contain a VRU
-        anon_labelling_imgs = aws_s3.Bucket(
-            self,
-            id="anon-labelling-imgs",
-            removal_policy=core.RemovalPolicy.DESTROY,
-            encryption=aws_s3.BucketEncryption.KMS_MANAGED,
-        )
-
-        pillow_layer = aws_lambda.LayerVersion(
-            self,
-            "PillowLayer",
-            code=aws_lambda.Code.from_asset(path.join(dirname(abspath(__file__)), 'pillow-layer')),
-            compatible_runtimes=[aws_lambda.Runtime("python3.6")],
-        )
-
-        select_labelling_imgs = aws_lambda.Function(
-            self,
-            "SelectLabellingImgs",
-            code=aws_lambda.Code.from_asset("./infrastructure/select-labelling-imgs"),
-            environment={
-                "image_bucket": anon_labelling_imgs.bucket_name,
-            },
-            memory_size=3008,
-            timeout=core.Duration.minutes(10),
-            vpc=vpc,
-            retry_attempts=0,
-            handler="select-labelling-imgs.lambda_handler",
-            runtime=aws_lambda.Runtime("python3.6"),
-            security_groups=fs.connections.security_groups,
-        )
-
-        select_labelling_imgs.add_layers(pillow_layer)
-
-        dest_bucket.add_event_notification(
-            aws_s3.EventType.OBJECT_CREATED,
-            s3n.LambdaDestination(select_labelling_imgs),
-            aws_s3.NotificationKeyFilter(suffix="json"),
-        )
-
-        select_labelling_imgs.add_to_role_policy(
-            aws_iam.PolicyStatement(
-                actions=[
-                    "kms:Decrypt",
-                    "kms:Encrypt",
-                    "kms:ReEncrypt*",
-                    "kms:DescribeKey",
-                    "kms:GenerateDataKey",
-                ],
-                resources=["*"],
-            )
-        )
-        select_labelling_imgs.add_to_role_policy(
-            aws_iam.PolicyStatement(
-                actions=["s3:List*", "s3:Get*", "s3:PutObject"], resources=["*"]
-            )
-        )
-        select_labelling_imgs.add_to_role_policy(
-            aws_iam.PolicyStatement(
-                actions=["rekognition:DetectText", "rekognition:DetectFaces"],
-                resources=["*"],
-            )
         )
 
         # MWAA execution role
@@ -487,9 +310,6 @@ class RosbagProcessor(core.Stack):
                 }
             )
         )
-
-        # MWAA secrets
-        # mwaa_secrets = aws_secretsmanager.Secret()
 
         # copy MWAA DAG sourcse
         dags = s3deploy.BucketDeployment(self, "deploy_dags",
