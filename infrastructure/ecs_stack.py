@@ -1,6 +1,7 @@
 from aws_cdk import (
     aws_ec2 as ec2,
     aws_s3,
+    aws_s3_deployment as s3deploy,
     aws_s3_notifications as s3n,
     aws_ecs as ecs,
     aws_ecr as ecr,
@@ -151,6 +152,17 @@ class RosbagProcessor(core.Stack):
         # Create VPC and Fargate Cluster
         # NOTE: Limit AZs to avoid reaching resource quotas
         vpc = ec2.Vpc(self, f"MyVpc", max_azs=2)
+
+        # Add VPC endpoints for SSM
+        vpc.add_interface_endpoint("ecr", service=ec2.InterfaceVpcEndpointAwsService.ECR)
+        vpc.add_interface_endpoint("ecr_docker", service=ec2.InterfaceVpcEndpointAwsService.ECR_DOCKER)
+        vpc.add_interface_endpoint("ec2_messages", service=ec2.InterfaceVpcEndpointAwsService.EC2_MESSAGES)
+        vpc.add_interface_endpoint("cloudwatch", service=ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH)
+        vpc.add_interface_endpoint("cloudwatch_logs", service=ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS)
+
+        # Add VPC endpoints for SSM
+        vpc.add_gateway_endpoint("s3", service=ec2.GatewayVpcEndpointAwsService('s3'))
+
 
         private_subnets = ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE)
 
@@ -476,17 +488,26 @@ class RosbagProcessor(core.Stack):
             )
         )
 
-
-        # MWAA bastion host
-        mwaa_bastion = ec2.BastionHostLinux(
-            self,
-            id="mwaa-bastion",
-            vpc=vpc
-        )
-        core.Tags.of(mwaa_bastion).add("airflow_function", "bastion")
-
         # MWAA secrets
         # mwaa_secrets = aws_secretsmanager.Secret()
+
+        # copy MWAA DAG sourcse
+        dags = s3deploy.BucketDeployment(self, "deploy_dags",
+                                  sources=[s3deploy.Source.asset("dags/")],
+                                  destination_bucket=dag_bucket,
+                                  destination_key_prefix="dags")
+
+        # copy plugins
+        plugins = s3deploy.BucketDeployment(self, "deploy_plugins",
+                                  sources=[s3deploy.Source.asset("plugins/")],
+                                  destination_bucket=dag_bucket,
+                                  destination_key_prefix="plugins")
+
+        # copy requirements
+        requirements = s3deploy.BucketDeployment(self, "deploy_requirements",
+                                  sources=[s3deploy.Source.asset("requirements/")],
+                                  destination_bucket=dag_bucket,
+                                  destination_key_prefix="requirements")
 
         # MWAA environment
         mwaa_subnet_ids = list(map(lambda x: x.subnet_id, vpc.private_subnets))
@@ -543,3 +564,4 @@ class RosbagProcessor(core.Stack):
                 "EnvironmentClass": "mw1.large"
             }
         )
+
