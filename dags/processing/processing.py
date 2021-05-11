@@ -77,7 +77,6 @@ def run_fargate_task(**kwargs):
     key = kwargs['ti'].xcom_pull(task_ids=f"bag_file_sensor", key=f"filename_s3_key")
     bucket = kwargs['ti'].xcom_pull(task_ids=f"bag_file_sensor", key=f"filename_s3_bucket")
 
-    # TODO where to pull this config, e.g. SecretsManager?
     dest_bucket = kwargs['bucket_dest']
     private_subnets = kwargs['private_subnets'].split(",")
     fargate_cluster = kwargs['fargate_cluster']
@@ -408,8 +407,9 @@ def draw_bounding_boxes(**kwargs):
             if key.endswith(".json"):
                 draw_bounding_box(bucket, key)
 
-def get_parameter(parameter):
+
+def get_parameter(param):
     ssm = boto3.client('ssm')
-    parameter = ssm.get_parameter(Name='/mwaa/rosbag/bag-src')
+    parameter = ssm.get_parameter(Name=param)
     return(parameter['Parameter']['Value'])
 
