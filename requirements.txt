@@ -1,16 +1,12 @@
 -e .
 aws_cdk.core==1.90.0
+aws_cdk.aws_dynamodb==1.90.0
 aws_cdk.aws_ec2==1.90.0
 aws_cdk.aws_s3==1.90.0
 aws_cdk.aws_ecs==1.90.0
-aws_cdk.aws_efs==1.90.0
 aws_cdk.aws_ecs_patterns==1.90.0
 aws_cdk.aws_ecr==1.90.0
-aws_cdk.aws_stepfunctions_tasks==1.90.0
-aws_cdk.aws_stepfunctions==1.90.0
 aws_cdk.aws_logs==1.90.0
-aws_cdk.aws_lambda_event_sources==1.90.0
-aws_cdk.aws_lambda==1.90.0
 aws_cdk.aws_mwaa==1.90.0
 aws_cdk.aws_s3_deployment==1.90.0
 aws_cdk.aws_ssm==1.90.0

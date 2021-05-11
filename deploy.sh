@@ -1,5 +1,20 @@
 #!/bin/bash
 
+if [ "$#" -ne 4 ]; then
+    cat << EOF
+
+    Incorrect number of parameters.
+
+    Usage:
+    ./deploy.sh <aws named profile> <cdk command> <include docker build?> <region>
+
+    Example:
+    ./deploy.sh default deploy true us-east-1
+
+EOF
+    exit 1
+fi
+
 profile=$1
 cmd=$2
 build=$3
