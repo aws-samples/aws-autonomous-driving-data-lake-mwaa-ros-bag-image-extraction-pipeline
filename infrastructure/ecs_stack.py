@@ -370,6 +370,16 @@ class RosbagProcessor(core.Stack):
         mwaa_exec_role.add_to_policy(
             aws_iam.PolicyStatement(
                 actions=[
+                    "ssm:*",
+                ],
+                effect=aws_iam.Effect.ALLOW,
+                resources=["*"],
+            )
+        )
+
+        mwaa_exec_role.add_to_policy(
+            aws_iam.PolicyStatement(
+                actions=[
                     "kms:Decrypt",
                     "kms:DescribeKey",
                     "kms:GenerateDataKey*",
