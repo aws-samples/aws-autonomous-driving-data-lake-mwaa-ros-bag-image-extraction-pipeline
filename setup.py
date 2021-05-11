@@ -11,11 +11,11 @@ setuptools.setup(
     description="Rosbag image extraction using MWAA",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    author="hschoen@amazon.com",
+    author="zadaa@amazon.com",
     package_dir={"": "infrastructure"},
     packages=setuptools.find_packages(where="infrastructure"),
     install_requires=[
-        "aws-cdk.core==1.83.0",
+        "aws-cdk.core==1.90.0",
     ],
     python_requires=">=3.9",
     classifiers=[

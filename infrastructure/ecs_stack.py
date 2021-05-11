@@ -1,7 +1,6 @@
 from aws_cdk import (
     aws_ec2 as ec2,
     aws_s3,
-    aws_s3_deployment as s3deploy,
     aws_ecs as ecs,
     aws_ecr as ecr,
     aws_iam,
@@ -10,10 +9,15 @@ from aws_cdk import (
     aws_dynamodb as dynamodb,
     core,
     aws_logs,
+    aws_s3_deployment,
+    aws_ssm
 )
 
 import boto3
 import os
+
+from os import path
+from os.path import dirname, abspath
 
 profile = os.environ["AWS_PROFILE"]
 boto3.setup_default_session(profile_name=profile)
@@ -83,12 +87,28 @@ class RosbagProcessor(core.Stack):
             block_public_access=aws_s3.BlockPublicAccess.BLOCK_ALL
         )
 
+        aws_ssm.CfnParameter(
+            self,
+            id="rosbag-bag-src",
+            type="String",
+            value=src_bucket.bucket_name,
+            name="/mwaa/rosbag/bag-src"
+        )
+
         dest_bucket = aws_s3.Bucket(
             self,
             id="dest-bucket",
             removal_policy=core.RemovalPolicy.DESTROY,
             encryption=aws_s3.BucketEncryption.KMS_MANAGED,
             block_public_access=aws_s3.BlockPublicAccess.BLOCK_ALL
+        )
+
+        aws_ssm.CfnParameter(
+            self,
+            id="rosbag-bag-dest",
+            type="String",
+            value=dest_bucket.bucket_name,
+            name="/mwaa/rosbag/bag-dest"
         )
 
         dag_bucket = aws_s3.Bucket(
@@ -98,6 +118,31 @@ class RosbagProcessor(core.Stack):
             removal_policy=core.RemovalPolicy.DESTROY,
             encryption=aws_s3.BucketEncryption.KMS_MANAGED,
             block_public_access=aws_s3.BlockPublicAccess.BLOCK_ALL
+        )
+
+        # Upload MWAA files to S3
+        s3_deployment = aws_s3_deployment.BucketDeployment(
+            self,
+            id="airflow-dag-plugins",
+            destination_bucket=dag_bucket,
+            sources=[aws_s3_deployment.Source.asset(path.join(dirname(abspath(__file__)), '../plugins'))],
+            destination_key_prefix="plugins"
+        )
+
+        s3_deployment = aws_s3_deployment.BucketDeployment(
+            self,
+            id="airflow-dag-requirements",
+            destination_bucket=dag_bucket,
+            sources=[aws_s3_deployment.Source.asset(path.join(dirname(abspath(__file__)), '../requirements'))],
+            destination_key_prefix="requirements"
+        )
+
+        s3_deployment = aws_s3_deployment.BucketDeployment(
+            self,
+            id="airflow-dag-dags",
+            destination_bucket=dag_bucket,
+            sources=[aws_s3_deployment.Source.asset(path.join(dirname(abspath(__file__)), '../dags'))],
+            destination_key_prefix="dags"
         )
 
         # Create VPC and Fargate Cluster
@@ -112,6 +157,15 @@ class RosbagProcessor(core.Stack):
         vpc.add_gateway_endpoint("s3", service=ec2.GatewayVpcEndpointAwsService('s3'))
 
         private_subnets = ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE)
+
+        # vpc private subnets parameter
+        aws_ssm.CfnParameter(
+            self,
+            id="private-subnets",
+            type="String",
+            value=",".join(list(map(lambda x: x.subnet_id, vpc.private_subnets))),
+            name="/mwaa/rosbag/private-subnets"
+        )
 
         ecs_task_role = aws_iam.Role(
             self,
@@ -158,6 +212,15 @@ class RosbagProcessor(core.Stack):
             task_role=ecs_task_role,
         )
 
+        # task definition parameters
+        aws_ssm.CfnParameter(
+            self,
+            id="task-definition-arn",
+            type="String",
+            value=task_definition.task_definition_arn,
+            name="/mwaa/rosbag/task-definition-arn"
+        )
+
         repo = ecr.Repository.from_repository_name(
             self, id=id, repository_name=ecr_repository_name
         )
@@ -175,9 +238,7 @@ class RosbagProcessor(core.Stack):
             container_name,
             image=img,
             memory_limit_mib=memory_limit_mib,
-            environment={
-                "topics_to_extract": "/tf"
-            },
+            environment={"topics_to_extract": "/tf"},
             logging=logs,
         )
 
@@ -189,6 +250,16 @@ class RosbagProcessor(core.Stack):
             container_insights=True,
             vpc=vpc,
         )
+
+        # fargate cluster paramater
+        aws_ssm.CfnParameter(
+            self,
+            id="rosbag-fargate-cluster",
+            type="String",
+            value=cluster.cluster_arn,
+            name="/mwaa/rosbag/fargate-cluster-arn"
+        )
+
 
         ## setup the rekogition labelling pipeline..
         # create a DynamoDB table to hold the results
@@ -202,6 +273,15 @@ class RosbagProcessor(core.Stack):
                 name="camera", type=dynamodb.AttributeType.STRING
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+        )
+
+        # dynamo db table parameter
+        aws_ssm.CfnParameter(
+            self,
+            id="dynamo-rek-results",
+            type="String",
+            value=rek_labels_db.table_name,
+            name="/mwaa/rosbag/dynamo-rek-results"
         )
 
         # create a DynamoDB table to monitor/debug the pipeline
@@ -307,23 +387,14 @@ class RosbagProcessor(core.Stack):
             )
         )
 
-        # copy MWAA DAG sourcse
-        dags = s3deploy.BucketDeployment(self, "deploy_dags",
-                                  sources=[s3deploy.Source.asset("dags/")],
-                                  destination_bucket=dag_bucket,
-                                  destination_key_prefix="dags")
-
-        # copy plugins
-        plugins = s3deploy.BucketDeployment(self, "deploy_plugins",
-                                  sources=[s3deploy.Source.asset("plugins/")],
-                                  destination_bucket=dag_bucket,
-                                  destination_key_prefix="plugins")
-
-        # copy requirements
-        requirements = s3deploy.BucketDeployment(self, "deploy_requirements",
-                                  sources=[s3deploy.Source.asset("requirements/")],
-                                  destination_bucket=dag_bucket,
-                                  destination_key_prefix="requirements")
+        # task_definition defautl container parameter
+        aws_ssm.CfnParameter(
+            self,
+            id="task-definition-default-container-name",
+            type="String",
+            value=task_definition.default_container.container_name,
+            name="/mwaa/rosbag/task-definition-default-container-name"
+        )
 
         # MWAA environment
         mwaa_subnet_ids = list(map(lambda x: x.subnet_id, vpc.private_subnets))
@@ -333,17 +404,6 @@ class RosbagProcessor(core.Stack):
             type="AWS::MWAA::Environment",
             properties={
                 "Name": "mwaa-environment",
-                "AirflowConfigurationOptions": {
-                    # TODO: this is DAG specific config & should not be wired into the MWAA environment
-                    #       where else can we put this? SecretsManager? Config?
-                    "bag.src": src_bucket.bucket_name,
-                    "bag.dest": dest_bucket.bucket_name,
-                    "private.subnets": ",".join(mwaa_subnet_ids),
-                    "dynamo.rek_results": rek_labels_db.table_name,
-                    "fargate.cluster": cluster.cluster_arn,
-                    "fargate.task_arn": task_definition.task_definition_arn,
-                    "fargate.task_name": task_definition.default_container.container_name
-                },
                 "NetworkConfiguration": {
                     "SubnetIds": mwaa_subnet_ids,
                     "SecurityGroupIds": [vpc.vpc_default_security_group]
@@ -380,4 +440,3 @@ class RosbagProcessor(core.Stack):
                 "EnvironmentClass": "mw1.large"
             }
         )
-
