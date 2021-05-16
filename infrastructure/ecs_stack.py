@@ -146,17 +146,34 @@ class RosbagProcessor(core.Stack):
         )
 
         # Create VPC and Fargate Cluster
-        vpc = ec2.Vpc(self, f"MyVpc", max_azs=2)
+        vpc = ec2.Vpc(
+            self,
+            id="mwaa-vpc",
+            cidr="10.192.0.0/16",
+            max_azs=2,
+            nat_gateways=1,
+            subnet_configuration=[
+                ec2.SubnetConfiguration(
+                    name="public", cidr_mask=24,
+                    reserved=False, subnet_type=ec2.SubnetType.PUBLIC),
+                ec2.SubnetConfiguration(
+                    name="private", cidr_mask=24,
+                    reserved=False, subnet_type=ec2.SubnetType.PRIVATE)
+            ],
+            enable_dns_hostnames=True,
+            enable_dns_support=True
+        )
 
         # Add VPC endpoints
+        vpc.add_interface_endpoint("airflow-api", service=ec2.InterfaceVpcEndpointAwsService(name="airflow.api"))
+        vpc.add_interface_endpoint("airflow-env", service=ec2.InterfaceVpcEndpointAwsService(name="airflow.env"))
+        vpc.add_interface_endpoint("airflow-ops", service=ec2.InterfaceVpcEndpointAwsService(name="airflow.ops"))
         vpc.add_interface_endpoint("ecr", service=ec2.InterfaceVpcEndpointAwsService.ECR)
         vpc.add_interface_endpoint("ecr_docker", service=ec2.InterfaceVpcEndpointAwsService.ECR_DOCKER)
         vpc.add_interface_endpoint("ec2_messages", service=ec2.InterfaceVpcEndpointAwsService.EC2_MESSAGES)
         vpc.add_interface_endpoint("cloudwatch", service=ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH)
         vpc.add_interface_endpoint("cloudwatch_logs", service=ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS)
         vpc.add_gateway_endpoint("s3", service=ec2.GatewayVpcEndpointAwsService('s3'))
-
-        private_subnets = ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE)
 
         # vpc private subnets parameter
         aws_ssm.CfnParameter(
@@ -294,110 +311,7 @@ class RosbagProcessor(core.Stack):
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
         )
 
-        # MWAA execution role
-        mwaa_exec_role = aws_iam.Role(
-            self,
-            "mwaa_exec_role",
-            assumed_by=aws_iam.ServicePrincipal("airflow.amazonaws.com"),
-            managed_policies=[
-                # TODO narrow down
-                aws_iam.ManagedPolicy.from_aws_managed_policy_name("job-function/DataScientist"),
-                aws_iam.ManagedPolicy.from_aws_managed_policy_name("AmazonS3FullAccess"),
-                aws_iam.ManagedPolicy.from_aws_managed_policy_name("AmazonSQSFullAccess"),
-                aws_iam.ManagedPolicy.from_aws_managed_policy_name("CloudWatchFullAccess"),
-            ],
-        )
-
-        mwaa_exec_role.assume_role_policy.add_statements(
-            aws_iam.PolicyStatement(
-                actions=["sts:AssumeRole"],
-                effect=aws_iam.Effect.ALLOW,
-                principals=[aws_iam.ServicePrincipal("airflow-env.amazonaws.com")]
-            )
-        )
-
-        # TODO narrow down
-        mwaa_exec_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                actions=[
-                    "logs:*",
-                ],
-                effect=aws_iam.Effect.ALLOW,
-                resources=["*"],
-            )
-        )
-
-        mwaa_exec_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                actions=[
-                    "ecs:*",
-                ],
-                effect=aws_iam.Effect.ALLOW,
-                resources=["*"],
-            )
-        )
-
-        mwaa_exec_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                actions=[
-                    "airflow:*",
-                ],
-                effect=aws_iam.Effect.ALLOW,
-                resources=["*"],
-            )
-        )
-
-        mwaa_exec_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                actions=[
-                    "iam:PassRole",
-                ],
-                effect=aws_iam.Effect.ALLOW,
-                resources=["*"],
-            )
-        )
-
-        mwaa_exec_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                actions=[
-                    "rekognition:*",
-                ],
-                effect=aws_iam.Effect.ALLOW,
-                resources=["*"],
-            )
-        )
-
-        mwaa_exec_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                actions=[
-                    "ssm:*",
-                ],
-                effect=aws_iam.Effect.ALLOW,
-                resources=["*"],
-            )
-        )
-
-        mwaa_exec_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                actions=[
-                    "kms:Decrypt",
-                    "kms:DescribeKey",
-                    "kms:GenerateDataKey*",
-                    "kms:Encrypt"
-                ],
-                effect=aws_iam.Effect.ALLOW,
-                not_resources=[f"arn:aws:kmw:*:{self.account}:key/*"],
-                conditions={
-                    "StringLike": {
-                        "kms:ViaService": [
-                            f"sqs.{self.region}.amazonaws.com"
-                        ]
-                    }
-                }
-            )
-        )
-
-        # task_definition defautl container parameter
+        # task_definition default container parameter
         aws_ssm.CfnParameter(
             self,
             id="task-definition-default-container-name",
@@ -407,46 +321,158 @@ class RosbagProcessor(core.Stack):
         )
 
         # MWAA environment
+
+        # Create MWAA IAM Policies and Roles
+        mwaa_policy_document = aws_iam.PolicyDocument(
+            statements=[
+                aws_iam.PolicyStatement(
+                    actions=["airflow:PublishMetrics"],
+                    effect=aws_iam.Effect.ALLOW,
+                    resources=[f"arn:aws:airflow:{self.region}:{self.account}:environment/mwaa-environment"],
+                ),
+                aws_iam.PolicyStatement(
+                    actions=[
+                        "s3:ListAllMyBuckets"
+                    ],
+                    effect=aws_iam.Effect.DENY,
+                    resources=[
+                        f"{dag_bucket.bucket_arn}/*",
+                        f"{dag_bucket.bucket_arn}"
+                    ],
+                ),
+                aws_iam.PolicyStatement(
+                    actions=[
+                        "s3:GetObject*",
+                        "s3:Head*",
+                        "s3:GetBucket*",
+                        "s3:List*"
+                    ],
+                    effect=aws_iam.Effect.ALLOW,
+                    resources=[
+                        f"{dag_bucket.bucket_arn}/*",
+                        f"{dag_bucket.bucket_arn}"
+                    ],
+                ),
+                aws_iam.PolicyStatement(
+                    actions=[
+                        "logs:CreateLogStream",
+                        "logs:CreateLogGroup",
+                        "logs:PutLogEvents",
+                        "logs:GetLogEvents",
+                        "logs:GetLogRecord",
+                        "logs:GetLogGroupFields",
+                        "logs:GetQueryResults"
+                    ],
+                    effect=aws_iam.Effect.ALLOW,
+                    resources=[
+                        f"arn:aws:logs:{self.region}:{self.account}:log-group:airflow-mwaa-environment-*"],
+                ),
+                aws_iam.PolicyStatement(
+                    actions=[
+                        "logs:DescribeLogGroups"
+                    ],
+                    effect=aws_iam.Effect.ALLOW,
+                    resources=["*"],
+                ),
+                aws_iam.PolicyStatement(
+                    actions=[
+                        "sqs:ChangeMessageVisibility",
+                        "sqs:DeleteMessage",
+                        "sqs:GetQueueAttributes",
+                        "sqs:GetQueueUrl",
+                        "sqs:ReceiveMessage",
+                        "sqs:SendMessage"
+                    ],
+                    effect=aws_iam.Effect.ALLOW,
+                    resources=[f"arn:aws:sqs:{self.region}:*:airflow-celery-*"],
+                ),
+                aws_iam.PolicyStatement(
+                    actions=[
+                        "kms:Decrypt",
+                        "kms:DescribeKey",
+                        "kms:GenerateDataKey*",
+                        "kms:Encrypt",
+                    ],
+                    effect=aws_iam.Effect.ALLOW,
+                    resources=["*"],
+                    conditions={
+                        "StringEquals": {
+                            "kms:ViaService": [
+                                f"sqs.{self.region}.amazonaws.com",
+                                f"s3.{self.region}.amazonaws.com",
+                            ]
+                        }
+                    },
+                ),
+                # TODO: weed out
+                aws_iam.PolicyStatement(
+                    actions=[
+                        "ecs:*",
+                        "ssm:*",
+                        "logs:*",
+                        "airflow:*",
+                        "rekognition:*",
+                        "iam:PassRole"
+                    ],
+                    effect=aws_iam.Effect.ALLOW,
+                    resources=["*"],
+                )
+            ]
+        )
+
+        mwaa_service_role = aws_iam.Role(
+            self,
+            "mwaa-service-role",
+            assumed_by=aws_iam.CompositePrincipal(
+                aws_iam.ServicePrincipal("airflow.amazonaws.com"),
+                aws_iam.ServicePrincipal("airflow-env.amazonaws.com"),
+            ),
+            inline_policies={"CDKmwaaPolicyDocument": mwaa_policy_document},
+            path="/service-role/"
+        )
+
+        mwaa_service_role.assume_role_policy.add_statements(
+            aws_iam.PolicyStatement(
+                actions=["sts:AssumeRole"],
+                effect=aws_iam.Effect.ALLOW,
+                principals=[aws_iam.ServicePrincipal("airflow-env.amazonaws.com")]
+            )
+        )
+
+        mwaa_logging_conf = aws_mwaa.CfnEnvironment.LoggingConfigurationProperty(
+            task_logs=aws_mwaa.CfnEnvironment.ModuleLoggingConfigurationProperty(enabled=True, log_level="INFO"),
+            worker_logs=aws_mwaa.CfnEnvironment.ModuleLoggingConfigurationProperty(enabled=True, log_level="INFO"),
+            scheduler_logs=aws_mwaa.CfnEnvironment.ModuleLoggingConfigurationProperty(enabled=True, log_level="INFO"),
+            dag_processing_logs=aws_mwaa.CfnEnvironment.ModuleLoggingConfigurationProperty(enabled=True, log_level="INFO"),
+            webserver_logs=aws_mwaa.CfnEnvironment.ModuleLoggingConfigurationProperty(enabled=True, log_level="INFO")
+        )
+
+        mwaa_security_group = ec2.SecurityGroup(
+            self,
+            id="mwaa-sg",
+            vpc=vpc,
+            security_group_name="mwaa-sg"
+        )
+        mwaa_security_group.connections.allow_internally(ec2.Port.all_traffic(), "MWAA")
+
         mwaa_subnet_ids = list(map(lambda x: x.subnet_id, vpc.private_subnets))
-        mwaa_environment = core.CfnResource(
+        mwaa_network_configuration = aws_mwaa.CfnEnvironment.NetworkConfigurationProperty(
+            security_group_ids=[mwaa_security_group.security_group_id],
+            subnet_ids=mwaa_subnet_ids,
+        )
+
+        mwaa_environment = aws_mwaa.CfnEnvironment(
             self,
             id="mwaa-environment",
-            type="AWS::MWAA::Environment",
-            properties={
-                "Name": "mwaa-environment",
-                "NetworkConfiguration": {
-                    "SubnetIds": mwaa_subnet_ids,
-                    "SecurityGroupIds": [vpc.vpc_default_security_group]
-                },
-                "LoggingConfiguration": {
-                    "DagProcessingLogs": {
-                        "Enabled": "true",
-                        "LogLevel": "INFO"
-                    },
-                    "SchedulerLogs": {
-                        "Enabled": "true",
-                        "LogLevel": "INFO"
-                    },
-                    "WebserverLogs": {
-                        "Enabled": "true",
-                        "LogLevel": "INFO"
-                    },
-                    "WorkerLogs": {
-                        "Enabled": "true",
-                        "LogLevel": "INFO"
-                    },
-                    "TaskLogs": {
-                        "Enabled": "true",
-                        "LogLevel": "INFO"
-                    }
-                },
-                "SourceBucketArn": dag_bucket.bucket_arn,
-                "DagS3Path": "dags",
-                "PluginsS3Path": "plugins/plugins.zip",
-                "RequirementsS3Path": "requirements/requirements.txt",
-                "ExecutionRoleArn": mwaa_exec_role.role_arn,
-                "WebserverAccessMode": "PUBLIC_ONLY",
-                "MaxWorkers": 25,
-                "EnvironmentClass": "mw1.large"
-            }
+            dag_s3_path="dags",
+            environment_class="mw1.small",
+            execution_role_arn=mwaa_service_role.role_arn,
+            logging_configuration=mwaa_logging_conf,
+            name="mwaa-environment",
+            network_configuration=mwaa_network_configuration,
+            max_workers=25,
+            plugins_s3_path="plugins/plugins.zip",
+            requirements_s3_path="requirements/requirements.txt",
+            source_bucket_arn=dag_bucket.bucket_arn,
+            webserver_access_mode="PUBLIC_ONLY"
         )

@@ -4,6 +4,10 @@ from aws_cdk import core
 from infrastructure.ecs_stack import RosbagProcessor
 import os
 import json
+import shutil
+
+#zip plugin
+shutil.make_archive('plugins/plugins', 'zip', 'plugins/')
 
 # Load config
 project_dir = os.path.dirname(os.path.abspath(__file__))
