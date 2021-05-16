@@ -338,10 +338,17 @@ class RosbagProcessor(core.Stack):
                     resources=[
                         f"{dag_bucket.bucket_arn}/*",
                         f"{dag_bucket.bucket_arn}"
+                        f"{src_bucket.bucket_arn}/*",
+                        f"{src_bucket.bucket_arn}",
+                        f"{dest_bucket.bucket_arn}/*",
+                        f"{dest_bucket.bucket_arn}"
                     ],
                 ),
                 aws_iam.PolicyStatement(
                     actions=[
+                        "s3:PutObject",
+                        "s3:PutObject*",
+                        "s3:DeleteObject",
                         "s3:GetObject*",
                         "s3:Head*",
                         "s3:GetBucket*",
@@ -350,7 +357,11 @@ class RosbagProcessor(core.Stack):
                     effect=aws_iam.Effect.ALLOW,
                     resources=[
                         f"{dag_bucket.bucket_arn}/*",
-                        f"{dag_bucket.bucket_arn}"
+                        f"{dag_bucket.bucket_arn}",
+                        f"{src_bucket.bucket_arn}/*",
+                        f"{src_bucket.bucket_arn}",
+                        f"{dest_bucket.bucket_arn}/*",
+                        f"{dest_bucket.bucket_arn}"
                     ],
                 ),
                 aws_iam.PolicyStatement(
