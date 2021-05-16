@@ -399,6 +399,16 @@ class RosbagProcessor(core.Stack):
                 ),
                 aws_iam.PolicyStatement(
                     actions=[
+                        "dynamodb:PutItem"
+                    ],
+                    effect=aws_iam.Effect.ALLOW,
+                    resources=[
+                        f"{rek_monitor_db.table_arn}",
+                        f"{rek_labels_db.table_arn}"
+                    ],
+                ),
+                aws_iam.PolicyStatement(
+                    actions=[
                         "kms:Decrypt",
                         "kms:DescribeKey",
                         "kms:GenerateDataKey*",
