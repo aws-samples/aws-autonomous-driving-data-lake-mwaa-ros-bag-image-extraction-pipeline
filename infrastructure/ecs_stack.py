@@ -121,7 +121,7 @@ class RosbagProcessor(core.Stack):
         )
 
         # Upload MWAA files to S3
-        s3_deployment = aws_s3_deployment.BucketDeployment(
+        plugins_deployment = aws_s3_deployment.BucketDeployment(
             self,
             id="airflow-dag-plugins",
             destination_bucket=dag_bucket,
@@ -129,7 +129,7 @@ class RosbagProcessor(core.Stack):
             destination_key_prefix="plugins"
         )
 
-        s3_deployment = aws_s3_deployment.BucketDeployment(
+        requirements_deployment = aws_s3_deployment.BucketDeployment(
             self,
             id="airflow-dag-requirements",
             destination_bucket=dag_bucket,
@@ -137,7 +137,7 @@ class RosbagProcessor(core.Stack):
             destination_key_prefix="requirements"
         )
 
-        s3_deployment = aws_s3_deployment.BucketDeployment(
+        dags_deployment = aws_s3_deployment.BucketDeployment(
             self,
             id="airflow-dag-dags",
             destination_bucket=dag_bucket,
@@ -425,7 +425,6 @@ class RosbagProcessor(core.Stack):
                         }
                     },
                 ),
-                # TODO: weed out
                 aws_iam.PolicyStatement(
                     actions=[
                         "ecs:*",
@@ -497,3 +496,6 @@ class RosbagProcessor(core.Stack):
             source_bucket_arn=dag_bucket.bucket_arn,
             webserver_access_mode="PUBLIC_ONLY"
         )
+        mwaa_environment.node.add_dependency(plugins_deployment)
+        mwaa_environment.node.add_dependency(requirements_deployment)
+        mwaa_environment.node.add_dependency(dags_deployment)
