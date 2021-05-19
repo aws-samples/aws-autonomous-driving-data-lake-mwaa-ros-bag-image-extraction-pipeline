@@ -39,19 +39,13 @@ class RosbagProcessor(core.Stack):
         """
         Creates the following infrastructure:
 
-            2 S3 Buckets
-                - "src" bucket will be monitored for incoming data, and each incoming file will trigger an ECS Task
-                - "dest" bucket will be the destination for saving processed data from the ECS Task
+            S3 Buckets
+                - "src" bucket will hold incoming data
+                - "dest" bucket will be the destination for saving processed data
                 - "dags" bucket will contain MWAA dags
 
-                - These bucket names are automatically passed as environment variables to your docker container
-                    In your docker container, access these bucket names via:
-
-                    import os
-                    src_bucket = os.environ["s3_source"]
-                    dest_bucket = os.environ["s3_destination"]
-
             MWAA environment
+                - managed Apache Airflow environment for workflow orchestration
 
             ECS Fargate Cluster
                 - Using Fargate, this cluster will not cost any money when no tasks are running
@@ -61,8 +55,9 @@ class RosbagProcessor(core.Stack):
             ECS Task Role - used by the docker container
                 - Read access to the "-in" bucket and write access to the "-out" bucket
 
-            VPC "MyVpc"
-                Task will be run in this VPC's private subnets
+            VPC
+                - Task will be run in this VPC's private subnets
+                - MWAA will use this VPC
 
             ECR Repository
                 - reference to the repository hosting the service's docker image
@@ -173,6 +168,8 @@ class RosbagProcessor(core.Stack):
         vpc.add_interface_endpoint("ec2_messages", service=ec2.InterfaceVpcEndpointAwsService.EC2_MESSAGES)
         vpc.add_interface_endpoint("cloudwatch", service=ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH)
         vpc.add_interface_endpoint("cloudwatch_logs", service=ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS)
+        vpc.add_interface_endpoint("sqs", service=ec2.InterfaceVpcEndpointAwsService.SQS)
+        vpc.add_interface_endpoint("sns", service=ec2.InterfaceVpcEndpointAwsService.SNS)
         vpc.add_gateway_endpoint("s3", service=ec2.GatewayVpcEndpointAwsService('s3'))
 
         # vpc private subnets parameter
@@ -321,7 +318,6 @@ class RosbagProcessor(core.Stack):
         )
 
         # MWAA environment
-
         # Create MWAA IAM Policies and Roles
         mwaa_policy_document = aws_iam.PolicyDocument(
             statements=[
