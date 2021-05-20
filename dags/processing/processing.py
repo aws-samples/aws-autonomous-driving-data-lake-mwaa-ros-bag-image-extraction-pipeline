@@ -1,3 +1,6 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
 METADATA_PROCESSING_KEY="processing.status"
 METADATA_PROCESSING_VALUE_FAILURE="failure"
 METADATA_PROCESSING_VALUE_COMPLETE="complete"
