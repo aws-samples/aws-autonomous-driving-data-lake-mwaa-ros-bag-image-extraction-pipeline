@@ -1,0 +1,7 @@
+{
+  "ecr-repository-name": "vsi-rosbag-repository",
+  "image-name": "my-vsi-ros-image",
+  "stack-id": "rosbag-processing-stack",
+  "cpu": 4096,
+  "memory-limit-mib": 12288
+}

@@ -1,0 +1,7 @@
+boto3
+numpy
+pandas
+psutil
+pyarrow==2.0.0
+pyyaml
+snappy
