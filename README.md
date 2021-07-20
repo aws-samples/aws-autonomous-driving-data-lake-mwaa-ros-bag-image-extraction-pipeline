@@ -15,7 +15,7 @@ Image after highlighting bounding boxes of detected objects
 * Install the AWS Cloud Development Kit (https://aws.amazon.com/cdk/)
 * Our example uses Python version 3.9 or newer
 * Docker (https://www.docker.com/) installed and running
-* Download the sample Rosbag file from (TODO include link to S3)
+* Download the sample Rosbag file from here: https://aws-autonomous-driving-dataset.s3.amazonaws.com/test-vehicle-01/072021/2020-10-05-11-10-58_1.bag
 
 ### Deployment
 Start the deployment by typing
