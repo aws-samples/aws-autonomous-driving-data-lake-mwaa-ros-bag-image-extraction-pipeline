@@ -188,11 +188,18 @@ class RosbagProcessor(core.Stack):
             self,
             "ecs_task_role2",
             assumed_by=aws_iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
-            managed_policies=[
-                aws_iam.ManagedPolicy.from_aws_managed_policy_name(
-                    "CloudWatchFullAccess"
-                )
-            ],
+        )
+
+        ecs_task_role.add_to_policy(
+            aws_iam.PolicyStatement(
+                actions=[
+                    "logs:CreateLogGroup",
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents",
+                    "logs:DescribeLogStreams",
+                ],
+                resources=["arn:aws:logs:*:*:*"],
+            )
         )
 
         ecs_task_role.add_to_policy(
