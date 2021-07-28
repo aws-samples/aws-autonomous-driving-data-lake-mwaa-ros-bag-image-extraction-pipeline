@@ -356,6 +356,7 @@ class RosbagProcessor(core.Stack):
                 ),
                 aws_iam.PolicyStatement(
                     actions=[
+                        "s3:GetBucketPublicAccessBlock",
                         "s3:PutObject",
                         "s3:PutObjectAcl",
                         "s3:GetObject",
