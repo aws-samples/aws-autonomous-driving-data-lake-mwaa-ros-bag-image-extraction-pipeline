@@ -193,6 +193,19 @@ class RosbagProcessor(core.Stack):
         ecs_task_role.add_to_policy(
             aws_iam.PolicyStatement(
                 actions=[
+                    "kms:Decrypt",
+                    "kms:Encrypt",
+                    "kms:ReEncrypt*",
+                    "kms:DescribeKey",
+                    "kms:GenerateDataKey",
+                ],
+                resources=["*"],
+            )
+        )
+
+        ecs_task_role.add_to_policy(
+            aws_iam.PolicyStatement(
+                actions=[
                     "logs:CreateLogGroup",
                     "logs:CreateLogStream",
                     "logs:PutLogEvents",
@@ -205,23 +218,28 @@ class RosbagProcessor(core.Stack):
         ecs_task_role.add_to_policy(
             aws_iam.PolicyStatement(
                 actions=[
-                    "kms:Decrypt",
-                    "kms:Encrypt",
-                    "kms:ReEncrypt*",
-                    "kms:DescribeKey",
-                    "kms:GenerateDataKey",
+                    "s3:GetObject",
+                    "s3:GetObjectAcl",
+                    "s3:ListBucket",
                 ],
-                resources=["*"],
+                resources=[
+                    f"{src_bucket.bucket_arn}/*",
+                    f"{src_bucket.bucket_arn}",
+                    f"{dest_bucket.bucket_arn}/*",
+                    f"{dest_bucket.bucket_arn}"
+                ]
             )
         )
 
         ecs_task_role.add_to_policy(
-            aws_iam.PolicyStatement(actions=["s3:Get*", "s3:List*"], resources=["*"])
-        )
-
-        ecs_task_role.add_to_policy(
             aws_iam.PolicyStatement(
-                actions=["s3:List*", "s3:PutObject*"], resources=["*"]
+                actions=[
+                    "s3:PutObject",
+                    "s3:PutObjectAcl"
+                ],
+                resources=[
+                    f"{dest_bucket.bucket_arn}/*"
+                ]
             )
         )
 
@@ -338,27 +356,13 @@ class RosbagProcessor(core.Stack):
                 ),
                 aws_iam.PolicyStatement(
                     actions=[
-                        "s3:ListAllMyBuckets"
-                    ],
-                    effect=aws_iam.Effect.DENY,
-                    resources=[
-                        f"{dag_bucket.bucket_arn}/*",
-                        f"{dag_bucket.bucket_arn}"
-                        f"{src_bucket.bucket_arn}/*",
-                        f"{src_bucket.bucket_arn}",
-                        f"{dest_bucket.bucket_arn}/*",
-                        f"{dest_bucket.bucket_arn}"
-                    ],
-                ),
-                aws_iam.PolicyStatement(
-                    actions=[
                         "s3:PutObject",
-                        "s3:PutObject*",
-                        "s3:DeleteObject",
-                        "s3:GetObject*",
-                        "s3:Head*",
-                        "s3:GetBucket*",
-                        "s3:List*"
+                        "s3:PutObjectAcl",
+                        "s3:GetObject",
+                        "s3:GetObjectAcl",
+                        "s3:ListBucket",
+                        "s3:GetObjectTagging",
+                        "s3:PutObjectTagging"
                     ],
                     effect=aws_iam.Effect.ALLOW,
                     resources=[
@@ -369,6 +373,16 @@ class RosbagProcessor(core.Stack):
                         f"{dest_bucket.bucket_arn}/*",
                         f"{dest_bucket.bucket_arn}"
                     ],
+                ),
+                aws_iam.PolicyStatement(
+                    actions=[
+                        "kms:Decrypt",
+                        "kms:Encrypt",
+                        "kms:ReEncrypt*",
+                        "kms:DescribeKey",
+                        "kms:GenerateDataKey",
+                    ],
+                    resources=["*"],
                 ),
                 aws_iam.PolicyStatement(
                     actions=[
@@ -405,7 +419,8 @@ class RosbagProcessor(core.Stack):
                 ),
                 aws_iam.PolicyStatement(
                     actions=[
-                        "dynamodb:PutItem"
+                        "dynamodb:PutItem",
+                        "dynamodb:UpdateItem"
                     ],
                     effect=aws_iam.Effect.ALLOW,
                     resources=[
@@ -415,33 +430,36 @@ class RosbagProcessor(core.Stack):
                 ),
                 aws_iam.PolicyStatement(
                     actions=[
-                        "kms:Decrypt",
-                        "kms:DescribeKey",
-                        "kms:GenerateDataKey*",
-                        "kms:Encrypt",
+                        "ssm:GetParameter"
                     ],
                     effect=aws_iam.Effect.ALLOW,
                     resources=["*"],
-                    conditions={
-                        "StringEquals": {
-                            "kms:ViaService": [
-                                f"sqs.{self.region}.amazonaws.com",
-                                f"s3.{self.region}.amazonaws.com",
-                            ]
-                        }
-                    },
                 ),
                 aws_iam.PolicyStatement(
                     actions=[
-                        "ecs:*",
-                        "ssm:*",
-                        "logs:*",
-                        "airflow:*",
-                        "rekognition:*",
-                        "iam:PassRole"
+                        "rekognition:DetectLabels"
                     ],
                     effect=aws_iam.Effect.ALLOW,
                     resources=["*"],
+                ),
+                aws_iam.PolicyStatement(
+                    actions=[
+                        "ecs:RunTask",
+                        "ecs:DescribeTasks",
+                        #"airflow:*",
+                    ],
+                    effect=aws_iam.Effect.ALLOW,
+                    resources=["*"],
+                ),
+                aws_iam.PolicyStatement(
+                    actions=[
+                        "iam:PassRole"
+                    ],
+                    effect=aws_iam.Effect.ALLOW,
+                    resources=[
+                        f"{task_definition.obtain_execution_role().role_arn}",
+                        f"{ecs_task_role.role_arn}"
+                    ],
                 )
             ]
         )
