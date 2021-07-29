@@ -446,8 +446,7 @@ class RosbagProcessor(core.Stack):
                 aws_iam.PolicyStatement(
                     actions=[
                         "ecs:RunTask",
-                        "ecs:DescribeTasks",
-                        #"airflow:*",
+                        "ecs:DescribeTasks"
                     ],
                     effect=aws_iam.Effect.ALLOW,
                     resources=["*"],
