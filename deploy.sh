@@ -22,9 +22,11 @@ region=$4
 
 export aws_account_id=$(aws --profile "$profile" sts get-caller-identity --query Account --output text)
 
-REPO_NAME=vsi-rosbag-repository # Should match the ecr repository name given in config.json
-IMAGE_NAME=my-vsi-ros-image          # Should match the image name given in config.json
+REPO_NAME=vsi-rosbag-repository-3 # Should match the ecr repository name given in config.json
+IMAGE_NAME=my-vsi-ros-image-3          # Should match the image name given in config.json
 
+python3.9 -m venv .env
+source .env/bin/activate
 pip install -r requirements.txt --use-deprecated=legacy-resolver | grep -v 'already satisfied'
 cdk bootstrap aws://$aws_account_id/$region
 
