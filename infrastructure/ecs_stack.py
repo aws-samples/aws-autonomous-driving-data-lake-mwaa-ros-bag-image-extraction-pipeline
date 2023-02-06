@@ -76,7 +76,6 @@ class RosbagProcessor(core.Stack):
         :param kwargs:
         """
         super().__init__(scope, id, **kwargs)
-
         src_bucket = aws_s3.Bucket(
             self,
             removal_policy=core.RemovalPolicy.DESTROY,
@@ -184,6 +183,20 @@ class RosbagProcessor(core.Stack):
             name="/mwaa/rosbag/private-subnets"
         )
 
+        ecs_execution_role = aws_iam.Role(
+            self,
+            "ecs_execution_role",
+            assumed_by=aws_iam.ServicePrincipal('ecs-tasks.amazonaws.com')
+        )   
+
+        ecs_execution_role.add_managed_policy(
+            aws_iam.ManagedPolicy.from_managed_policy_arn(
+                self,
+                "EcsFargateServiceRole",
+                managed_policy_arn='arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+            )
+        )
+
         ecs_task_role = aws_iam.Role(
             self,
             "ecs_task_role2",
@@ -242,7 +255,6 @@ class RosbagProcessor(core.Stack):
                 ]
             )
         )
-
         # Define task definition with a single container
         # The image is built & published from a local asset directory
         task_definition = ecs.FargateTaskDefinition(
@@ -251,7 +263,9 @@ class RosbagProcessor(core.Stack):
             family=f"{image_name}-family",
             cpu=cpu,
             memory_limit_mib=memory_limit_mib,
+            ephemeral_storage_gib=100,
             task_role=ecs_task_role,
+            execution_role=ecs_execution_role
         )
 
         # task definition parameters
@@ -279,6 +293,7 @@ class RosbagProcessor(core.Stack):
         container_def = task_definition.add_container(
             container_name,
             image=img,
+            cpu=cpu,
             memory_limit_mib=memory_limit_mib,
             environment={"topics_to_extract": "/tf"},
             logging=logs,

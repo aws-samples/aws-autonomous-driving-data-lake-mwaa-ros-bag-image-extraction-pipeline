@@ -4,4 +4,4 @@ pandas
 psutil
 pyarrow==2.0.0
 pyyaml
-snappy
+python-snappy

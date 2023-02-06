@@ -76,7 +76,6 @@ def run_fargate_task(**kwargs):
     :return:
     """
     import boto3
-
     key = kwargs['ti'].xcom_pull(task_ids=f"bag_file_sensor", key=f"filename_s3_key")
     bucket = kwargs['ti'].xcom_pull(task_ids=f"bag_file_sensor", key=f"filename_s3_bucket")
 
