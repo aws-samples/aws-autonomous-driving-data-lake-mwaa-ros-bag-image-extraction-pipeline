@@ -2,6 +2,6 @@ boto3
 numpy
 pandas
 psutil
-pyarrow==2.0.0
+pyarrow==14.0.1
 pyyaml
 snappy
